@@ -6,6 +6,7 @@ import re
 import requests
 import argparse
 import json
+import yt_dlp
 import socket
 import shlex
 import functools
@@ -154,8 +155,8 @@ def download_video(url, path, quality_height=None):
         # Если точного совпадения нет, берем лучшее доступное.
         fmt_str = f'bestvideo[height={quality_height}][ext=mp4]+bestaudio[ext=m4a]/best[height={quality_height}][ext=mp4]/best'
     else:
-        # По умолчанию: не выше 1080p (для экономии места/трафика), но лучшее качество.
-        fmt_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best'
+        # По умолчанию: Максимальное качество
+        fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
 
     pbar = None
     
