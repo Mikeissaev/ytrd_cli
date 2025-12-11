@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# Temp files for ytrd_cli
+temp_video.mp4
+temp_audio.mp3
+*.part
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/

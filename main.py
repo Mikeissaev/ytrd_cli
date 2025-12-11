@@ -1,0 +1,592 @@
+import os
+import subprocess
+import sys
+import shutil
+import re
+import requests
+import argparse
+import yt_dlp
+import socket
+import shlex
+import functools
+import time
+import vot
+from tqdm import tqdm
+from pathlib import Path
+import platform
+
+# --- НАСТРОЙКИ ---
+# --- НАСТРОЙКИ ---
+def get_default_output_dir():
+    """Возвращает путь к папке загрузок в зависимости от ОС."""
+    # Проверка на Termux (Android)
+    if os.path.exists("/data/data/com.termux/files/usr"):
+        if os.path.exists("/sdcard/Download"):
+            return "/sdcard/Download"
+        return "/storage/emulated/0/Download"
+    
+    # Windows / Linux / MacOS
+    return str(Path.home() / "Downloads")
+
+OUTPUT_DIR = get_default_output_dir()
+TEMP_VIDEO = "temp_video.mp4"
+TEMP_AUDIO = "temp_audio.mp3"
+TERMUX_PREFIX = "/data/data/com.termux/files/usr"
+TERMUX_BIN = os.path.join(TERMUX_PREFIX, "bin")
+
+# Добавляем пути Termux
+os.environ["PATH"] = f"{TERMUX_BIN}:{os.environ.get('PATH', '')}"
+
+# Цвета
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+RESET = "\033[0m"
+
+CLEAN_BAR = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{rate_fmt}]"
+
+def ask_to_retry(error_message):
+    """Выводит сообщение об ошибке и спрашивает пользователя о повторной попытке."""
+    print(f"\n{RED}❌ {error_message}{RESET}")
+    while True:
+        try:
+            choice = input(f"{YELLOW}Попробовать снова? (y/n): {RESET}").lower().strip()
+            if choice in ('y', 'yes', 'д', 'да'):
+                return True
+            if choice in ('n', 'no', 'н', 'нет'):
+                return False
+        except (KeyboardInterrupt, EOFError):
+            return False
+
+def retry_on_network_error(func):
+    """Декоратор для повторных попыток выполнения функции при сетевых ошибках."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError) as e:
+                error_msg = getattr(e, 'msg', str(e))
+                if not ask_to_retry(f"Сетевая ошибка в '{func.__name__}': {error_msg}"):
+                    print(f"{RED}Завершение работы по требованию пользователя.{RESET}")
+                    cleanup(True)
+                    sys.exit(1)
+    return wrapper
+
+@retry_on_network_error
+def check_internet():
+    """Проверяет наличие интернет-соединения."""
+    # Декоратор обработает исключение OSError
+    socket.create_connection(("8.8.8.8", 53), timeout=5)
+
+def check_write_permissions(path):
+    # Если папка не существует, пробуем создать
+    if not os.path.exists(path):
+        try:
+            os.makedirs(path)
+        except OSError as e:
+            print(f"{RED}❌ Не удалось создать папку {path}: {e}{RESET}")
+            sys.exit(1)
+    
+    if not os.access(path, os.W_OK):
+        print(f"{RED}❌ Нет прав на запись в {path}.{RESET}")
+        sys.exit(1)
+
+def validate_url(url):
+    if not re.search(r'(youtube\.com|youtu\.?be)', url):
+        print(f"{RED}❌ Ссылка не похожа на YouTube.{RESET}")
+        sys.exit(1)
+
+def get_binary_path(tool_name):
+    path = shutil.which(tool_name)
+    if path: return path
+    termux_path = os.path.join(TERMUX_BIN, tool_name)
+    if os.path.exists(termux_path): return termux_path
+    return None
+
+def install_check():
+    required = ['ffmpeg']
+    for tool in required:
+        if get_binary_path(tool) is None:
+            print(f"{RED}❌ Не найден: {tool}{RESET}")
+            sys.exit(1)
+
+def cleanup(error=False):
+    # Если произошла ошибка, не удаляем файлы для отладки
+    if error:
+        print(f"{YELLOW}⚠️ Временные файлы оставлены для проверки: {TEMP_VIDEO}, {TEMP_AUDIO}{RESET}")
+        return
+    try:
+        if os.path.exists(TEMP_VIDEO): os.remove(TEMP_VIDEO)
+        if os.path.exists(TEMP_AUDIO): os.remove(TEMP_AUDIO)
+    except Exception: pass
+
+def clean_name(name):
+    if not name: return "Video_Dubbed"
+    clean = "".join([c if c.isalnum() or c in " .-_()," else "" for c in name])
+    return clean.strip()[:60]
+
+class Logger:
+    def debug(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): print(f"{RED}{msg}{RESET}")
+
+@retry_on_network_error
+def get_available_qualities(url):
+    """Получает доступные разрешения видео, его название и автора."""
+    print(f"{YELLOW}🔍 Анализ...{RESET}")
+    opts = {'quiet': True, 'no_warnings': True, 'logger': Logger()}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        formats = info.get('formats', [])
+        heights = set()
+        for f in formats:
+            h = f.get('height')
+            if h and h > 144: heights.add(h)
+        return sorted(list(heights), reverse=True), info.get('title', 'Video'), info.get('uploader', 'Unknown'), info.get('duration', 0)
+
+def download_video(url, path, quality_height=None):
+    """Скачивает видео с YouTube с помощью yt-dlp с логикой повтора."""
+    if quality_height:
+        # Формат строки для yt-dlp:
+        # Выбираем лучшее видео с заданной высотой или меньше, и лучшее аудио.
+        # Если точного совпадения нет, берем лучшее доступное.
+        fmt_str = f'bestvideo[height={quality_height}][ext=mp4]+bestaudio[ext=m4a]/best[height={quality_height}][ext=mp4]/best'
+    else:
+        # По умолчанию: не выше 1080p (для экономии места/трафика), но лучшее качество.
+        fmt_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best'
+
+    pbar = None
+    
+    while True:
+        try:
+            pbar = tqdm(total=0, unit='B', unit_scale=True, unit_divisor=1024, 
+                        desc=f"Скачивание ({quality_height if quality_height else 'Best'}p)", 
+                        dynamic_ncols=True, colour='blue', bar_format=CLEAN_BAR)
+
+            def hook(d):
+                if d['status'] == 'downloading':
+                    try:
+                        total = d.get('total_bytes') or d.get('total_bytes_estimate')
+                        if total: pbar.total = int(total)
+                        pbar.n = int(d.get('downloaded_bytes', 0))
+                        pbar.refresh()
+                    except Exception: pass
+                elif d['status'] == 'finished':
+                    # Просто обновляем до 100%, закрытие будет в основной функции
+                    if pbar.total and pbar.n < pbar.total:
+                        pbar.n = pbar.total
+                        pbar.refresh()
+
+            opts = {
+                'format': fmt_str,
+                'outtmpl': path,
+                'quiet': True,
+                'no_warnings': True,
+                'logger': Logger(),
+                'progress_hooks': [hook],
+                'merge_output_format': 'mp4',
+                # Важно: nopart=True предотвращает создание .part файлов.
+                # Это критично для Windows, так как переименование .part файла может вызвать ошибку доступа (WinError 32),
+                # если файл всё еще удерживается антивирусом или системой.
+                'nopart': True,
+                'ffmpeg_location': get_binary_path('ffmpeg') or 'ffmpeg'
+            }
+
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if pbar and not pbar.disable:
+                    pbar.close()
+                return info.get('duration', 0), info.get('height', 0)
+
+        except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError) as e:
+            if pbar and not pbar.disable:
+                pbar.close()
+
+            error_msg = getattr(e, 'msg', str(e))
+            if not ask_to_retry(f"Сетевая ошибка при скачивании видео: {error_msg}"):
+                print(f"{RED}Завершение работы по требованию пользователя.{RESET}")
+                cleanup(True)
+                sys.exit(1)
+
+
+def download_audio(url, path):
+    """Скачивает аудиодорожку перевода с логикой повтора."""
+    pbar = None
+    while True:
+        try:
+            r = requests.get(url, stream=True, timeout=15)
+            r.raise_for_status()
+            size = int(r.headers.get('content-length', 0))
+            
+            pbar = tqdm(total=size, unit='iB', unit_scale=True, desc="Скачивание озвучки", 
+                      dynamic_ncols=True, colour='green', bar_format=CLEAN_BAR)
+            
+            with open(path, 'wb') as f:
+                for chunk in r.iter_content(1024):
+                    pbar.update(len(chunk))
+                    f.write(chunk)
+            
+            pbar.close()
+            return # Успешное завершение
+
+        except (OSError, requests.exceptions.RequestException) as e:
+            if pbar and not pbar.disable:
+                pbar.close()
+
+            error_msg = str(e)
+            if not ask_to_retry(f"Сетевая ошибка при скачивании аудио: {error_msg}"):
+                print(f"{RED}Завершение работы по требованию пользователя.{RESET}")
+                cleanup(True)
+                sys.exit(1)
+
+def ask_merge_mode():
+    """Спрашивает пользователя о режиме объединения аудио."""
+    print(f"\n{YELLOW}Выберите режим объединения:{RESET}")
+    print(f"  [1] [MIX]Смешать (оригинал 20% + перевод 120%)")
+    print(f"  [2] [DUAL] Две дорожки (оригинал и перевод, выбор в плеере)")
+    
+    while True:
+        try:
+            choice = input("Выбор [1]: ").strip()
+            if not choice: return 2 # Default (Mix)
+            if choice == '1': return 2 # Mix (old 2)
+            if choice == '2': return 3 # Dual (old 3)
+        except (KeyboardInterrupt, EOFError):
+            return 2
+
+def build_ffmpeg_command(mode, final_path):
+    ffmpeg_exec = get_binary_path('ffmpeg') or 'ffmpeg'
+    
+    base_cmd = [
+        ffmpeg_exec, '-y',
+        '-loglevel', 'quiet', '-progress', 'pipe:1',
+        '-threads', '0', '-i', TEMP_VIDEO, '-i', TEMP_AUDIO
+    ]
+    
+    
+    # Mode 1: Translation audio ONLY (or primary), Original might be mapped but muted or not mapped? 
+    # Let's interpret "Аудио с переводом" as replacement or just track 1.
+    # But usually user wants to HEAR translation.
+    # Previous default logic was: '-map', '0:v', '-map', '1:a', '-map', '0:a?', '-c', 'copy'
+    # This maps Track 1 (Translation) as first audio, and Track 0 (Original) as second (optional).
+    
+    if mode == 2: # Режим 2: Смешивание (Mix)
+        # filter_complex делает следующее:
+        # [0:a]volume=0.2[orig] - берет звук из видео (0), уменьшает громкость до 20%, называет поток [orig]
+        # [1:a]volume=1.2[dub]  - берет звук перевода (1), увеличивает громкость до 120%, называет поток [dub]
+        # [orig][dub]amix...    - смешивает оба потока. duration=shortest обрезает по самой короткой дорожке (обычно видео)
+        filter_complex = "[0:a]volume=0.2[orig];[1:a]volume=1.2[dub];[orig][dub]amix=inputs=2:duration=shortest[out]"
+        cmd_end = [
+            '-filter_complex', filter_complex,
+            '-map', '0:v',        # Берем видео из источника 0 (оригинал)
+            '-map', '[out]',      # Берем наш смикшированный звук
+            '-c:v', 'copy',       # Видео не перекодируем (быстро)
+            '-c:a', 'aac',        # Аудио кодируем в AAC (требуется для фильтра)
+            '-b:a', '128k',       # Битрейт аудио
+            '-strict', '-2'       # Разрешаем экспериментальные кодеки (иногда нужно для старых ffmpeg)
+        ]
+    elif mode == 3: # Режим 3: Две дорожки (Dual)
+        cmd_end = [
+            '-map', '0:v',        # Видео оригинала
+            '-map', '0:a',        # Аудио оригинала (Дорожка 1)
+            '-map', '1:a',        # Аудио перевода (Дорожка 2)
+            '-c', 'copy'          # Всё копируем без перекодирования
+        ]
+    else: # Режим 1 (Fallback / Dub only, если вернем его)
+        # Просто копируем видео и аудио перевода
+        cmd_end = [
+            '-map', '0:v', 
+            '-map', '1:a', 
+            '-map', '0:a?', # Опционально оригинал, если есть?
+            '-c', 'copy'
+        ]
+        
+    if False: # args.fast removed from helper signature, assume passed globally or ignored here? 
+        # We need args here if we want to support faststart. 
+        # Let's assume we add it always or pass args.
+        pass
+        
+    cmd_end.extend(['-movflags', '+faststart']) # Always useful
+    
+    cmd_end.append(final_path)
+    
+    return base_cmd + cmd_end
+
+def run_ffmpeg(cmd_list, duration):
+    # Для отладки заменяем quiet на error
+    try:
+        idx = cmd_list.index('-loglevel')
+        if cmd_list[idx + 1] == 'quiet':
+            cmd_list[idx + 1] = 'error'
+    except (ValueError, IndexError):
+        pass # -loglevel не найден или находится в конце
+
+    try:
+        # shell=False - это более безопасный способ
+        # bufsize=1 (line buffered), encoding='utf-8' для корректного чтения
+        proc = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                universal_newlines=True, shell=False, bufsize=1, 
+                                encoding='utf-8', errors='replace')
+        
+        fmt = "{l_bar}{bar}| {n_fmt}/{total_fmt}s"
+        duration = int(duration) if duration else 100
+        pbar = tqdm(total=duration, unit="s", desc="Монтаж (FFmpeg)", dynamic_ncols=True, colour='yellow', bar_format=fmt)
+        
+        last = 0
+        # Читаем stdout для прогрессбара
+        while True:
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None: break
+                continue
+                
+            line = line.strip()
+            if not line: continue
+
+            # Парсинг времени
+            current_sec = None
+            if "out_time_us=" in line:
+                try:
+                    us = int(line.split('=')[1].strip())
+                    current_sec = us // 1000000
+                except (ValueError, IndexError): pass
+            elif "out_time=" in line: # Fallback
+                try:
+                    # out_time=00:00:05.123456
+                    t_str = line.split('=')[1].strip()
+                    parts = t_str.split(':')
+                    if len(parts) == 3:
+                        h, m, s = int(parts[0]), int(parts[1]), float(parts[2])
+                        current_sec = int(h * 3600 + m * 60 + s)
+                except (ValueError, IndexError): pass
+
+            if current_sec is not None:
+                if current_sec > duration: current_sec = duration
+                if current_sec > last:
+                    pbar.update(current_sec - last)
+                    last = current_sec
+        
+        rc = proc.poll()
+        if rc == 0:
+            # Принудительно завершаем прогресс-бар перед закрытием
+            if pbar.total and pbar.n < pbar.total:
+                pbar.n = pbar.total
+                pbar.refresh()
+        
+        pbar.close()
+        
+        if rc != 0:
+            err_out = proc.stderr.read()
+            print(f"\n{RED}❌ Ошибка FFmpeg (код {rc}):{RESET}")
+            # shlex.join корректно преобразует список в строку для отображения
+            print(f"{YELLOW}Команда:{RESET} {shlex.join(cmd_list)}")
+            print(f"{RED}Лог ошибки:{RESET}\n{err_out}")
+            cleanup(error=True)
+            sys.exit(1)
+            
+    except (OSError, FileNotFoundError) as e:
+        print(f"\n{RED}❌ Ошибка запуска FFmpeg: {e}{RESET}")
+        print(f"{YELLOW}Убедитесь, что ffmpeg установлен и доступен в PATH.{RESET}")
+        sys.exit(1)
+
+
+
+def get_user_input_and_info(args):
+    """Получает URL, анализирует видео и спрашивает качество."""
+    url = args.url
+    if not url:
+        try:
+            url = input(f"{CYAN}🔗 Вставьте ссылку: {RESET}").strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.exit(0)
+    
+    if not url:
+        print(f"{RED}❌ Ссылка не может быть пустой.{RESET}")
+        sys.exit(1)
+        
+    validate_url(url)
+    try:
+        check_internet()
+    except Exception as e:
+        print(f"{RED}❌ Ошибка подключения: {e}{RESET}")
+        sys.exit(1)
+
+    selected_quality = args.quality
+    
+    # Всегда получаем информацию о видео (включая duration)
+    qualities, title, uploader, duration = get_available_qualities(url)
+    
+    if not selected_quality and qualities:
+        print(f"🎥 {title}")
+        print(f"{YELLOW}Выберите качество:{RESET}")
+        for i, q in enumerate(qualities, 1):
+            print(f"  [{i}] {q}p")
+        print(f"  [0] Авто")
+        try:
+            choice = input("Выбор: ").strip()
+            if choice and choice != '0':
+                selected_quality = qualities[int(choice) - 1]
+        except (ValueError, IndexError, EOFError, KeyboardInterrupt):
+            pass 
+    
+    return url, selected_quality, title, uploader, duration
+
+def get_translation_audio(url, duration):
+    """Использует vot.py для получения перевода, ожидает готовности и скачивает."""
+    print(f"\n{YELLOW}[1/3] 🗣 Запрос перевода...{RESET}")
+    
+    # Поллинг (максимум 5 минут)
+    max_attempts = 30 # 30 * 10 сек = 5 минут
+    for attempt in range(max_attempts):
+        result = vot.translate_video(url, duration)
+        
+        if not result.get("success"):
+            print(f"{RED}❌ Ошибка API перевода: {result.get('message')}{RESET}")
+            return False
+            
+        status = result.get("status")
+        if status == "Ready":
+            audio_url = result.get("url")
+            if audio_url:
+                print(f"{GREEN}✅ Перевод готов! Скачивание...{RESET}")
+                download_audio(audio_url, TEMP_AUDIO)
+                return True
+            else:
+                 print(f"{RED}❌ Ошибка: Статус Ready, но нет URL.{RESET}")
+                 return False
+                 
+        elif status == "Waiting":
+            print(f"{YELLOW}⏳ Перевод в процессе... (Попытка {attempt+1}/{max_attempts}){RESET}")
+            time.sleep(10) # Ждем 10 секунд
+            
+        else:
+             print(f"{RED}❌ Неизвестный статус или ошибка: {result.get('message')}{RESET}")
+             return False
+
+    print(f"{RED}❌ Время ожидания перевода истекло.{RESET}")
+    return False
+
+def core_logic():
+    epilog_text = """
+Примеры использования:
+  python main.py https://youtu.be/VIDEO_ID          # Интерактивный режим
+  python main.py https://youtu.be/VIDEO_ID -m       # Принудительно смешать аудио
+  python main.py https://youtu.be/VIDEO_ID -q 1080  # Скачать 1080p
+    """
+    
+    parser = argparse.ArgumentParser(
+        description="🚀 Утилита для скачивания видео с YouTube с автоматическим наложением голосового перевода от Яндекс.",
+        epilog=epilog_text,
+        formatter_class=argparse.RawTextHelpFormatter,
+        add_help=False
+    )
+    
+    # Русификация заголовков групп
+    parser._positionals.title = 'Позиционные аргументы'
+    parser._optionals.title = 'Опции'
+    
+    # Добавляем стандартный help с русским описанием
+    parser.add_argument("-h", "--help", action="help", help="Показать это сообщение справки и выйти")
+    
+    parser.add_argument("url", nargs="?", help="🔗 Ссылка на видео YouTube.\nЕсли не указана, скрипт запросит её при запуске.")
+    parser.add_argument("-o", "--output", default=OUTPUT_DIR, help=f"📂 Папка для сохранения видео.\nПо умолчанию: {OUTPUT_DIR}")
+    parser.add_argument("-m", "--mix", action="store_true", help="🔀 Режим смешивания (Mix).\nЕсли указан, оригинальная дорожка будет приглушена (20%%),\nа перевод наложен поверх (120%%).\nИнтерактивный вопрос будет пропущен.")
+    parser.add_argument("-q", "--quality", type=int, help="📺 Предпочитаемое качество видео (высота строки).\nПример: 1080, 720, 480.\nЕсли не указано, будет предложен выбор.")
+    args = parser.parse_args()
+
+    # --- Начальная настройка ---
+    install_check()
+    check_write_permissions(args.output)
+    cleanup()
+
+    # --- Шаг 1: Инфо о видео ---
+    # Получаем всю информацию сразу (title, uploader, duration),
+    # чтобы знать длительность видео для запроса перевода.
+    # Это позволяет избежать лишних запросов и ошибок с несоответствием длины.
+    url, selected_quality, title, uploader, duration = get_user_input_and_info(args)
+    if not duration: duration = 341.0 # Fallback
+
+    # Сначала пробуем получить перевод. Это наиболее вероятная точка отказа,
+    # поэтому делаем это ДО скачивания тяжелого видеофайла.
+    translation_success = get_translation_audio(url, duration)
+    
+    if not translation_success:
+        # Перевод не найден, спрашиваем пользователя
+        print(f"\n{YELLOW}⚠️ Перевод не найден.{RESET}")
+        save_original = False
+        while True:
+            try:
+                choice = input(f"Скачать оригинальное видео? (y/n): ").lower().strip()
+                if choice in ('y', 'yes', 'д', 'да'):
+                    save_original = True
+                    break
+                if choice in ('n', 'no', 'н', 'нет'):
+                    break
+            except (KeyboardInterrupt, EOFError):
+                break
+        
+        if not save_original:
+            cleanup()
+            print("Отмена.")
+            return
+
+    # Если перевод найден (или пользователь согласился качать оригинал),
+    # приступаем к загрузке видео. Используем yt-dlp с прогресс-баром.
+    print(f"\n{YELLOW}[2/3] 🎬 Скачиваем видео...{RESET}")
+    # duration уже получен ранее (для перевода), но yt-dlp вернет точный
+    _, actual_height = download_video(url, TEMP_VIDEO, selected_quality)
+
+    # Используем FFmpeg для объединения видео и аудио.
+    # В зависимости от режима, либо просто копируем потоки, либо используем фильтр amix.
+    if translation_success:
+        print(f"\n{YELLOW}[3/3] ⚙️ Сборка файла...{RESET}")
+        
+        mode = 2 # Default (Mix)
+        if args.mix:
+            mode = 2
+        else:
+            mode = ask_merge_mode()
+            
+        # Короткие обозначения режимов
+        mode_tags = {1: "Dub", 2: "Mix", 3: "Dual"}
+        mode_str = f"[{mode_tags.get(mode, 'Dub')}]"
+        
+        # Разрешение
+        res_str = f"[{actual_height}p]" if actual_height else ""
+        
+        name = f"{clean_name(uploader)} - {clean_name(title)} {res_str}{mode_str}.mp4"
+        final_path = os.path.join(args.output, name)
+            
+        cmd_list = build_ffmpeg_command(mode, final_path)
+        run_ffmpeg(cmd_list, duration)
+    else:
+        # Просто копируем скачанное видео
+        # Если перевод не удался, режима нет (Original)
+        res_str = f"[{actual_height}p]" if actual_height else ""
+        name = f"{clean_name(uploader)} - {clean_name(title)} {res_str}.mp4"
+        final_path = os.path.join(args.output, name)
+        
+        print(f"Копирование файла в '{final_path}'...")
+        try:
+            shutil.copy(TEMP_VIDEO, final_path)
+        except Exception as e:
+             print(f"{RED}❌ Не удалось скопировать файл: {e}{RESET}")
+
+
+    # --- Завершение ---
+    cleanup()
+    if os.path.exists(final_path):
+        print(f"\n{GREEN}✅ Готово!{RESET}\n📂 {final_path}")
+    else:
+        print(f"\n{YELLOW}Операция отменена. Временные файлы удалены.{RESET}")
+
+if __name__ == "__main__":
+    # Исправление кодировки для Windows консоли
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding='utf-8')
+
+    try: core_logic()
+    except KeyboardInterrupt: cleanup(); sys.exit(0)
+    except Exception as e: print(f"{RED}Error: {e}{RESET}"); cleanup(True)
