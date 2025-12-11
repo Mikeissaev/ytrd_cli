@@ -33,7 +33,7 @@
 
 1.  Клонируйте репозиторий:
     ```bash
-    git clone <repository_url>
+    git clone https://github.com/Mikeissaev/ytrd_cli.git
     cd ytrd_cli
     ```
 2.  Установите пакет:
