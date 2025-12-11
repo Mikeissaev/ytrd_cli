@@ -116,7 +116,7 @@ def install_check():
 def cleanup(error=False):
     # Если произошла ошибка, не удаляем файлы для отладки
     if error:
-        print(f"{YELLOW}⚠️ Временные файлы оставлены для проверки: {TEMP_VIDEO}, {TEMP_AUDIO}{RESET}")
+        #print(f"{YELLOW}⚠️ Временные файлы оставлены для проверки: {TEMP_VIDEO}, {TEMP_AUDIO}{RESET}")
         return
     try:
         if os.path.exists(TEMP_VIDEO): os.remove(TEMP_VIDEO)
@@ -136,7 +136,7 @@ class Logger:
 @retry_on_network_error
 def get_available_qualities(url):
     """Получает доступные разрешения видео, его название и автора."""
-    print(f"{YELLOW}🔍 Анализ...{RESET}")
+    print(f"{YELLOW}Анализ...{RESET}")
     opts = {'quiet': True, 'no_warnings': True, 'logger': Logger()}
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -163,7 +163,7 @@ def download_video(url, path, quality_height=None):
     while True:
         try:
             pbar = tqdm(total=0, unit='B', unit_scale=True, unit_divisor=1024, 
-                        desc=f"Скачивание ({quality_height if quality_height else 'Best'}p)", 
+                        desc=f"[{quality_height if quality_height else 'Best'}p]", 
                         dynamic_ncols=True, colour='blue', bar_format=CLEAN_BAR)
 
             def hook(d):
@@ -201,9 +201,17 @@ def download_video(url, path, quality_height=None):
                     pbar.close()
                 return info.get('duration', 0), info.get('height', 0)
 
-        except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError) as e:
+        except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError, ValueError) as e:
             if pbar and not pbar.disable:
                 pbar.close()
+
+            # Если файл скачался, но yt-dlp упал при пост-процессинге (например, парсинг ответа)
+            if os.path.exists(path) and os.path.getsize(path) > 1024:
+                # print(f"\n{YELLOW}⚠️ yt-dlp завершил работу с ошибкой, но файл найден.{RESET}")
+                # print(f"{YELLOW}Текст ошибки: {e}{RESET}")
+                # print(f"{GREEN}Продолжаем обработку скачанного файла...{RESET}")
+                # Молча возвращаем успех, так как файл есть
+                return 0, (quality_height if quality_height else 0)
 
             error_msg = getattr(e, 'msg', str(e))
             if not ask_to_retry(f"Сетевая ошибка при скачивании видео: {error_msg}"):
@@ -221,7 +229,7 @@ def download_audio(url, path):
             r.raise_for_status()
             size = int(r.headers.get('content-length', 0))
             
-            pbar = tqdm(total=size, unit='iB', unit_scale=True, desc="Скачивание озвучки", 
+            pbar = tqdm(total=size, unit='iB', unit_scale=True, desc="Загрузка", 
                       dynamic_ncols=True, colour='green', bar_format=CLEAN_BAR)
             
             with open(path, 'wb') as f:
@@ -245,12 +253,12 @@ def download_audio(url, path):
 def ask_merge_mode():
     """Спрашивает пользователя о режиме объединения аудио."""
     print(f"\n{YELLOW}Выберите режим объединения:{RESET}")
-    print(f"  [1] [MIX]Смешать (оригинал 20% + перевод 120%)")
+    print(f"  [1] [MIX] Смешать (оригинал 20% + перевод 120%)")
     print(f"  [2] [DUAL] Две дорожки (оригинал и перевод, выбор в плеере)")
     
     while True:
         try:
-            choice = input("Выбор [1]: ").strip()
+            choice = input("Выбор: ").strip()
             if not choice: return 2 # Default (Mix)
             if choice == '1': return 2 # Mix (old 2)
             if choice == '2': return 3 # Dual (old 3)
@@ -293,7 +301,8 @@ def build_ffmpeg_command(mode, final_path):
             '-map', '0:v',        # Видео оригинала
             '-map', '0:a',        # Аудио оригинала (Дорожка 1)
             '-map', '1:a',        # Аудио перевода (Дорожка 2)
-            '-c', 'copy'          # Всё копируем без перекодирования
+            '-c', 'copy',         # Всё копируем без перекодирования
+            '-bsf:a', 'aac_adtstoasc' # Исправление для AAC в MP4
         ]
     else: # Режим 1 (Fallback / Dub only, если вернем его)
         # Просто копируем видео и аудио перевода
@@ -301,7 +310,8 @@ def build_ffmpeg_command(mode, final_path):
             '-map', '0:v', 
             '-map', '1:a', 
             '-map', '0:a?', # Опционально оригинал, если есть?
-            '-c', 'copy'
+            '-c', 'copy',
+            '-bsf:a', 'aac_adtstoasc'
         ]
         
     if False: # args.fast removed from helper signature, assume passed globally or ignored here? 
@@ -315,7 +325,7 @@ def build_ffmpeg_command(mode, final_path):
     
     return base_cmd + cmd_end
 
-def run_ffmpeg(cmd_list, duration):
+def run_ffmpeg(cmd_list, duration, mode_name="FFmpeg"):
     # Для отладки заменяем quiet на error
     try:
         idx = cmd_list.index('-loglevel')
@@ -326,37 +336,40 @@ def run_ffmpeg(cmd_list, duration):
 
     try:
         # shell=False - это более безопасный способ
-        # bufsize=1 (line buffered), encoding='utf-8' для корректного чтения
-        proc = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+        # stderr=subprocess.STDOUT объединяет потоки, чтобы избежать deadlocks при переполнении буфера stderr
+        proc = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
                                 universal_newlines=True, shell=False, bufsize=1, 
                                 encoding='utf-8', errors='replace')
         
         fmt = "{l_bar}{bar}| {n_fmt}/{total_fmt}s"
         duration = int(duration) if duration else 100
-        pbar = tqdm(total=duration, unit="s", desc="Монтаж (FFmpeg)", dynamic_ncols=True, colour='yellow', bar_format=fmt)
+        pbar = tqdm(total=duration, unit="s", desc=f"[{mode_name}]", dynamic_ncols=True, colour='yellow', bar_format=fmt)
         
         last = 0
-        # Читаем stdout для прогрессбара
+        full_log = [] # Сохраняем весь вывод для отладки в случае ошибки
+        
+        # Читаем stdout (который теперь включает и stderr)
         while True:
             line = proc.stdout.readline()
             if not line:
                 if proc.poll() is not None: break
                 continue
                 
-            line = line.strip()
-            if not line: continue
+            full_log.append(line)
+            line_str = line.strip()
+            if not line_str: continue
 
             # Парсинг времени
             current_sec = None
-            if "out_time_us=" in line:
+            if "out_time_us=" in line_str:
                 try:
-                    us = int(line.split('=')[1].strip())
+                    us = int(line_str.split('=')[1].strip())
                     current_sec = us // 1000000
                 except (ValueError, IndexError): pass
-            elif "out_time=" in line: # Fallback
+            elif "out_time=" in line_str: # Fallback
                 try:
                     # out_time=00:00:05.123456
-                    t_str = line.split('=')[1].strip()
+                    t_str = line_str.split('=')[1].strip()
                     parts = t_str.split(':')
                     if len(parts) == 3:
                         h, m, s = int(parts[0]), int(parts[1]), float(parts[2])
@@ -379,11 +392,11 @@ def run_ffmpeg(cmd_list, duration):
         pbar.close()
         
         if rc != 0:
-            err_out = proc.stderr.read()
             print(f"\n{RED}❌ Ошибка FFmpeg (код {rc}):{RESET}")
             # shlex.join корректно преобразует список в строку для отображения
             print(f"{YELLOW}Команда:{RESET} {shlex.join(cmd_list)}")
-            print(f"{RED}Лог ошибки:{RESET}\n{err_out}")
+            print(f"{RED}Лог выполнения:{RESET}")
+            print("".join(full_log[-20:])) # Печатаем последние 20 строк лога
             cleanup(error=True)
             sys.exit(1)
             
@@ -424,10 +437,11 @@ def get_user_input_and_info(args):
         print(f"{YELLOW}Выберите качество:{RESET}")
         for i, q in enumerate(qualities, 1):
             print(f"  [{i}] {q}p")
-        print(f"  [0] Авто")
         try:
-            choice = input("Выбор: ").strip()
-            if choice and choice != '0':
+            choice = input(f"Выбор [1]: ").strip()
+            if not choice:
+                selected_quality = qualities[0]
+            else:
                 selected_quality = qualities[int(choice) - 1]
         except (ValueError, IndexError, EOFError, KeyboardInterrupt):
             pass 
@@ -436,7 +450,7 @@ def get_user_input_and_info(args):
 
 def get_translation_audio(url, duration):
     """Использует vot.py для получения перевода, ожидает готовности и скачивает."""
-    print(f"\n{YELLOW}[1/3] 🗣 Запрос перевода...{RESET}")
+    print(f"\n{YELLOW}[1/3] Запрос перевода...{RESET}")
     
     # Поллинг (максимум 5 минут)
     max_attempts = 30 # 30 * 10 сек = 5 минут
@@ -451,7 +465,7 @@ def get_translation_audio(url, duration):
         if status == "Ready":
             audio_url = result.get("url")
             if audio_url:
-                print(f"{GREEN}✅ Перевод готов! Скачивание...{RESET}")
+                print(f"{GREEN}✅ Перевод готов!{RESET}")
                 download_audio(audio_url, TEMP_AUDIO)
                 return True
             else:
@@ -469,6 +483,40 @@ def get_translation_audio(url, duration):
     print(f"{RED}❌ Время ожидания перевода истекло.{RESET}")
     return False
 
+def handle_existing_file(path):
+    """Проверяет существование файла и спрашивает пользователя, что делать."""
+    if not os.path.exists(path):
+        return path
+        
+    print(f"\n{YELLOW}Файл уже существует: {path}{RESET}")
+    print("  [1] Заменить")
+    print("  [2] Переименовать")
+    print("  [3] Отмена")
+    
+    while True:
+        try:
+            choice = input("Выбор: ").strip()
+            if not choice: choice = '2' # Default Rename
+
+            if choice == '1':
+                return path
+            elif choice == '2':
+                base, ext = os.path.splitext(path)
+                counter = 1
+                new_path = f"{base} ({counter}){ext}"
+                while os.path.exists(new_path):
+                    counter += 1
+                    new_path = f"{base} ({counter}){ext}"
+                #print(f"{GREEN}Новое имя: {new_path}{RESET}")
+                return new_path
+            elif choice == '3':
+                print(f"{YELLOW}Отмена операции.{RESET}")
+                cleanup()
+                sys.exit(0)
+        except (KeyboardInterrupt, EOFError):
+            cleanup()
+            sys.exit(0)
+
 def core_logic():
     epilog_text = """
 Примеры использования:
@@ -479,7 +527,7 @@ def core_logic():
     """
     
     parser = argparse.ArgumentParser(
-        description="🚀 Утилита для скачивания видео с YouTube с автоматическим наложением голосового перевода от Яндекс.",
+        description="🚀 Утилита для скачивания видео с YouTube с автоматическим наложением голосового перевода.",
         epilog=epilog_text,
         formatter_class=argparse.RawTextHelpFormatter,
         add_help=False
@@ -537,14 +585,14 @@ def core_logic():
 
     # Если перевод найден (или пользователь согласился качать оригинал),
     # приступаем к загрузке видео. Используем yt-dlp с прогресс-баром.
-    print(f"\n{YELLOW}[2/3] 🎬 Скачиваем видео...{RESET}")
+    print(f"\n{YELLOW}[2/3] Загрузка видео...{RESET}")
     # duration уже получен ранее (для перевода), но yt-dlp вернет точный
     _, actual_height = download_video(url, TEMP_VIDEO, selected_quality)
 
     # Используем FFmpeg для объединения видео и аудио.
     # В зависимости от режима, либо просто копируем потоки, либо используем фильтр amix.
     if translation_success:
-        print(f"\n{YELLOW}[3/3] ⚙️ Сборка файла...{RESET}")
+        print(f"\n{YELLOW}[3/3] Сборка файла...{RESET}")
         
         mode = 2 # Default (Mix)
         if args.mix:
@@ -556,22 +604,30 @@ def core_logic():
             
         # Короткие обозначения режимов
         mode_tags = {1: "Dub", 2: "Mix", 3: "Dual"}
+        
         mode_str = f"[{mode_tags.get(mode, 'Dub')}]"
+        mode_name = mode_tags.get(mode, 'FFmpeg').upper()
         
         # Разрешение
         res_str = f"[{actual_height}p]" if actual_height else ""
         
         name = f"{clean_name(uploader)} - {clean_name(title)} {res_str}{mode_str}.mp4"
         final_path = os.path.join(args.output, name)
+        
+        # --- Проверка существования ---
+        final_path = handle_existing_file(final_path)
             
         cmd_list = build_ffmpeg_command(mode, final_path)
-        run_ffmpeg(cmd_list, duration)
+        run_ffmpeg(cmd_list, duration, mode_name)
     else:
         # Просто копируем скачанное видео
         # Если перевод не удался, режима нет (Original)
         res_str = f"[{actual_height}p]" if actual_height else ""
         name = f"{clean_name(uploader)} - {clean_name(title)} {res_str}.mp4"
         final_path = os.path.join(args.output, name)
+        
+        # --- Проверка существования ---
+        final_path = handle_existing_file(final_path)
         
         print(f"Копирование файла в '{final_path}'...")
         try:
@@ -583,7 +639,8 @@ def core_logic():
     # --- Завершение ---
     cleanup()
     if os.path.exists(final_path):
-        print(f"\n{GREEN}✅ Готово!{RESET}\n📂 {final_path}")
+        print(f"\n{GREEN}✅ Готово!{RESET}")
+        print(f"📂 {final_path}")
     else:
         print(f"\n{YELLOW}Операция отменена. Временные файлы удалены.{RESET}")
 

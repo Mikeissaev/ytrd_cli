@@ -14,9 +14,13 @@ build/
 *.egg-info/
 
 # Temp files for ytrd_cli
-temp_video.mp4
-temp_audio.mp3
+temp_*
+*.temp.*
 *.part
+*.ytdl
+*.f*.mp4
+*.f*.m4a
+*.f*.webm
 
 # Logs
 *.log
