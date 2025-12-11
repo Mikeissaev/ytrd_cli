@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ytrd-cli"
+name = "ytrd_cli"
 version = "1.0.0"
-description = "YouTube Downloader with Yandex Video Translation integration"
+description = "Утилита командной строки для скачивания видео с YouTube с автоматическим наложением закадрового перевода."
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
