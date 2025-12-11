@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ytrd-cli"
+version = "1.0.0"
+description = "YouTube Downloader with Yandex Video Translation integration"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+  {name = "User", email = "user@example.com"},
+]
+dependencies = [
+  "requests",
+  "yt-dlp",
+  "tqdm",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.scripts]
+ytrd = "ytrd_cli.main:entry_point"
+
+[tool.setuptools.packages.find]
+where = ["src"]

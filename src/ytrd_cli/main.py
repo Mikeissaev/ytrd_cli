@@ -5,12 +5,12 @@ import shutil
 import re
 import requests
 import argparse
-import yt_dlp
+import json
 import socket
 import shlex
 import functools
 import time
-import vot
+from . import vot
 from tqdm import tqdm
 from pathlib import Path
 import platform
@@ -471,9 +471,9 @@ def get_translation_audio(url, duration):
 def core_logic():
     epilog_text = """
 Примеры использования:
-  python main.py https://youtu.be/VIDEO_ID          # Интерактивный режим
-  python main.py https://youtu.be/VIDEO_ID -m       # Принудительно смешать аудио
-  python main.py https://youtu.be/VIDEO_ID -q 1080  # Скачать 1080p
+  ytrd https://youtu.be/VIDEO_ID          # Интерактивный режим
+  ytrd https://youtu.be/VIDEO_ID -m       # Принудительно смешать аудио
+  ytrd https://youtu.be/VIDEO_ID -q 1080  # Скачать 1080p
     """
     
     parser = argparse.ArgumentParser(
@@ -582,11 +582,20 @@ def core_logic():
     else:
         print(f"\n{YELLOW}Операция отменена. Временные файлы удалены.{RESET}")
 
-if __name__ == "__main__":
+def entry_point():
+    """Точка входа для CLI (entry point)."""
     # Исправление кодировки для Windows консоли
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding='utf-8')
 
-    try: core_logic()
-    except KeyboardInterrupt: cleanup(); sys.exit(0)
-    except Exception as e: print(f"{RED}Error: {e}{RESET}"); cleanup(True)
+    try:
+        core_logic()
+    except KeyboardInterrupt:
+        cleanup()
+        sys.exit(0)
+    except Exception as e:
+        print(f"{RED}Error: {e}{RESET}")
+        cleanup(True)
+
+if __name__ == "__main__":
+    entry_point()

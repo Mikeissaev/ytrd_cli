@@ -5,6 +5,13 @@ __pycache__/
 .venv/
 env/
 venv/
+build/
+dist/
+*.egg-info/
+
+dist/
+build/
+*.egg-info/
 
 # Temp files for ytrd_cli
 temp_video.mp4
