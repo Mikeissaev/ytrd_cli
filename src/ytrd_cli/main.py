@@ -660,6 +660,27 @@ def handle_existing_file(path):
             cleanup()
             sys.exit(0)
 
+def validate_args(args):
+    """Проверяет аргументы на совместимость. Если есть конфликт, сбрасывает их."""
+    reset_needed = False
+    
+    # 1. Смешивание и Dual одновременно
+    if args.mix and args.dual:
+        print(f"{YELLOW}⚠️  Обнаружен конфликт аргументов (--mix и --dual).{RESET}")
+        reset_needed = True
+        
+    # 2. Только аудио вместе с видео-опциями
+    if args.audio and (args.mix or args.dual or args.quality):
+         print(f"{YELLOW}⚠️  Обнаружен конфликт аргументов (--audio с настройками видео).{RESET}")
+         reset_needed = True
+
+    if reset_needed:
+        print(f"{YELLOW}Все аргументы сброшены. Переход в интерактивный режим.{RESET}")
+        args.mix = False
+        args.dual = False
+        args.quality = None
+        args.audio = False
+
 def core_logic():
     epilog_text = """
 Примеры использования:
@@ -690,6 +711,8 @@ def core_logic():
     parser.add_argument("-q", "--quality", type=int, help="Предпочитаемое качество видео (высота строки).\nПример: 1080, 720, 480.\nЕсли не указано, будет предложен выбор.")
     parser.add_argument("-a", "--audio", action="store_true", help="Режим 'Только аудио'.\nСкачивает только переведенную аудиодорожку (mp3).")
     args = parser.parse_args()
+
+    validate_args(args)
 
     # --- Начальная настройка ---
     install_check()
