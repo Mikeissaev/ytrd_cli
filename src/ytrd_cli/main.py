@@ -325,6 +325,56 @@ def download_audio(url, path):
                 cleanup(True)
                 sys.exit(1)
 
+def download_youtube_audio(url, path):
+    """Скачивает аудио с YouTube в формате MP3."""
+    # Убираем расширение из пути для outtmpl, так как конвертер добавит .mp3
+    base_path = os.path.splitext(path)[0]
+    
+    opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': base_path + '.%(ext)s',
+        'quiet': True,
+        'no_warnings': True,
+        'logger': Logger(),
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'ffmpeg_location': get_binary_path('ffmpeg') or 'ffmpeg',
+        'retries': 10,
+        'fragment_retries': 10,
+        'retry_sleep': 5,
+    }
+
+    # Прогресс-бар (упрощенный, так как тут нет merge)
+    pbar = tqdm(total=0, unit='B', unit_scale=True, unit_divisor=1024, 
+                desc="[Audio]", dynamic_ncols=True, colour='green', bar_format=CLEAN_BAR)
+    
+    def hook(d):
+        if d['status'] == 'downloading':
+            try:
+                total = d.get('total_bytes') or d.get('total_bytes_estimate')
+                if total: pbar.total = int(total)
+                pbar.n = int(d.get('downloaded_bytes', 0))
+                pbar.refresh()
+            except Exception: pass
+        elif d['status'] == 'finished':
+            if pbar.total: pbar.n = pbar.total
+            pbar.refresh()
+
+    opts['progress_hooks'] = [hook]
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+            pbar.close()
+            return True
+    except Exception as e:
+        pbar.close()
+        print(f"{RED}❌ Ошибка скачивания аудио: {e}{RESET}")
+        return False
+
 def ask_merge_mode():
     """Спрашивает пользователя о режиме объединения аудио."""
     print(f"\n{YELLOW}Выберите режим объединения:{RESET}")
@@ -513,14 +563,21 @@ def get_user_input_and_info(args):
         print(f"{YELLOW}⚠️ Качество {selected_quality}p недоступно для этого видео.{RESET}")
         selected_quality = None
     
+    # Режим "Только аудио" может быть выбран через меню или аргументы
+    if args.audio:
+         selected_quality = 'audio'
+    
     if not selected_quality and qualities:
         print(f"🎥 {title}")
         print(f"{YELLOW}Выберите качество:{RESET}")
         for i, q in enumerate(qualities, 1):
             print(f"  [{i}] {q}p")
+        print(f"  [0] Только аудио")
         try:
             choice = input(f"Выбор [1]: ").strip()
-            if not choice:
+            if choice == '0':
+                selected_quality = 'audio'
+            elif not choice:
                 selected_quality = qualities[0]
             else:
                 selected_quality = qualities[int(choice) - 1]
@@ -529,9 +586,9 @@ def get_user_input_and_info(args):
     
     return url, selected_quality, title, uploader, duration, language
 
-def get_translation_audio(url, duration):
+def get_translation_audio(url, duration, step_label="[1/3]"):
     """Использует vot.py для получения перевода, ожидает готовности и скачивает."""
-    print(f"\n{YELLOW}[1/3] Запрос перевода...{RESET}")
+    print(f"\n{YELLOW}{step_label} Запрос перевода...{RESET}")
     
     # Поллинг (максимум 5 минут)
     max_attempts = 30 # 30 * 10 сек = 5 минут
@@ -626,6 +683,7 @@ def core_logic():
     parser.add_argument("-m", "--mix", action="store_true", help="Режим смешивания (Mix).\nЕсли указан, оригинальная дорожка будет приглушена (20%%),\nа перевод наложен поверх (120%%).")
     parser.add_argument("-d", "--dual", action="store_true", help="Режим двух дорожек (Dual).\nСохраняет оригинальное аудио и перевод как отдельные переключаемые дорожки.")
     parser.add_argument("-q", "--quality", type=int, help="Предпочитаемое качество видео (высота строки).\nПример: 1080, 720, 480.\nЕсли не указано, будет предложен выбор.")
+    parser.add_argument("-a", "--audio", action="store_true", help="Режим 'Только аудио'.\nСкачивает только переведенную аудиодорожку (mp3).")
     args = parser.parse_args()
 
     # --- Начальная настройка ---
@@ -640,6 +698,7 @@ def core_logic():
     url, selected_quality, title, uploader, duration, language = get_user_input_and_info(args)
     if not duration: duration = 341.0 # Fallback
 
+    is_audio_only = (selected_quality == 'audio')
     translation_success = False
     skip_translation = False
 
@@ -654,10 +713,41 @@ def core_logic():
             return
     
     if not skip_translation:
-        # Сначала пробуем получить перевод. Это наиболее вероятная точка отказа,
-        # поэтому делаем это ДО скачивания тяжелого видеофайла.
-        translation_success = get_translation_audio(url, duration)
+        # Сначала пробуем получить перевод. Это наиболее вероятная точка отказа.
+        label = "[1/2]" if is_audio_only else "[1/3]"
+        translation_success = get_translation_audio(url, duration, label)
     
+    if is_audio_only:
+        if skip_translation:
+             print(f"\n{YELLOW}[1/1] Загрузка оригинального аудио...{RESET}")
+             name = f"{clean_name(uploader)} - {clean_name(title)} [Original].mp3"
+             final_path = os.path.join(args.output, name)
+             final_path = handle_existing_file(final_path)
+             
+             if download_youtube_audio(url, final_path):
+                 print(f"\n{GREEN}✅ Готово!{RESET}")
+                 print(f"📂 {final_path}")
+             else:
+                 print(f"{RED}❌ Не удалось скачать аудио.{RESET}")
+
+        elif translation_success:
+            print(f"\n{YELLOW}[2/2] Сохранение аудио...{RESET}")
+            name = f"{clean_name(uploader)} - {clean_name(title)} [AudioTranslation].mp3"
+            final_path = os.path.join(args.output, name)
+            final_path = handle_existing_file(final_path)
+            
+            try:
+                shutil.copy(TEMP_AUDIO, final_path)
+                print(f"\n{GREEN}✅ Готово!{RESET}")
+                print(f"📂 {final_path}")
+            except Exception as e:
+                print(f"{RED}❌ Не удалось сохранить аудио: {e}{RESET}")
+        else:
+            print(f"{RED}❌ Перевод не найден. Скачивание аудио отменено.{RESET}")
+        
+        cleanup()
+        return
+
     if not translation_success and not skip_translation:
         # Перевод не найден, спрашиваем пользователя
         print(f"\n{YELLOW}⚠️ Перевод не найден.{RESET}")
