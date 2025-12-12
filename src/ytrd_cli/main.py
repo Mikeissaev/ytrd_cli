@@ -11,6 +11,7 @@ import socket
 import shlex
 import functools
 import time
+import glob
 from . import vot
 from tqdm import tqdm
 from pathlib import Path
@@ -53,6 +54,18 @@ def ask_to_retry(error_message):
     while True:
         try:
             choice = input(f"{YELLOW}Попробовать снова? (y/n): {RESET}").lower().strip()
+            if choice in ('y', 'yes', 'д', 'да'):
+                return True
+            if choice in ('n', 'no', 'н', 'нет'):
+                return False
+        except (KeyboardInterrupt, EOFError):
+            return False
+
+def ask_yes_no(question):
+    """Задает вопрос и ждет ответа y/n."""
+    while True:
+        try:
+            choice = input(f"{question} (y/n): ").lower().strip()
             if choice in ('y', 'yes', 'д', 'да'):
                 return True
             if choice in ('n', 'no', 'н', 'нет'):
@@ -119,8 +132,26 @@ def cleanup(error=False):
         #print(f"{YELLOW}⚠️ Временные файлы оставлены для проверки: {TEMP_VIDEO}, {TEMP_AUDIO}{RESET}")
         return
     try:
-        if os.path.exists(TEMP_VIDEO): os.remove(TEMP_VIDEO)
-        if os.path.exists(TEMP_AUDIO): os.remove(TEMP_AUDIO)
+        # Удаляем все временные файлы видео и аудио
+        for f in glob.glob("temp_video*"):
+            try: os.remove(f)
+            except OSError: pass
+            
+        for f in glob.glob("temp_audio*"):
+            try: os.remove(f)
+            except OSError: pass
+    except Exception: pass
+
+def clean_video_partials():
+    """Удаляет все временные файлы видео (но оставляет аудио перевода)."""
+    try:
+        # Удаляем temp_video.* (mp4, mkv, .part и т.д.)
+        for f in glob.glob("temp_video*"):
+            # Не трогаем перевод (temp_audio.mp3)
+            if "temp_audio" in f: continue
+            try:
+                os.remove(f)
+            except OSError: pass
     except Exception: pass
 
 def clean_name(name):
@@ -144,19 +175,43 @@ def get_available_qualities(url):
         heights = set()
         for f in formats:
             h = f.get('height')
-            if h and h > 144: heights.add(h)
-        return sorted(list(heights), reverse=True), info.get('title', 'Video'), info.get('uploader', 'Unknown'), info.get('duration', 0)
+            if h and h > 144:
+                # Фильтруем раскадровки и не-видео форматы
+                vcodec = f.get('vcodec')
+                if vcodec == 'none': continue 
+                if 'storyboard' in (f.get('format_note') or ''): continue
+                
+                heights.add(h)
+        return sorted(list(heights), reverse=True), info.get('title', 'Video'), info.get('uploader', 'Unknown'), info.get('duration', 0), info.get('language')
 
 def download_video(url, path, quality_height=None):
     """Скачивает видео с YouTube с помощью yt-dlp с логикой повтора."""
-    if quality_height:
-        # Формат строки для yt-dlp:
-        # Выбираем лучшее видео с заданной высотой или меньше, и лучшее аудио.
-        # Если точного совпадения нет, берем лучшее доступное.
-        fmt_str = f'bestvideo[height={quality_height}][ext=mp4]+bestaudio[ext=m4a]/best[height={quality_height}][ext=mp4]/best'
+    # Определяем порог для High-Res (всё, что выше 1080p, считаем High-Res)
+    is_high_res = quality_height and quality_height > 1080
+    
+    if is_high_res:
+        # Для 4K/2K используем MKV (VP9 + AAC)
+        # Убираем ограничение ext=mp4 для видео
+        fmt_str = f'bestvideo[height={quality_height}]+bestaudio[ext=m4a]/best[height={quality_height}]/best'
+        ext = 'mkv'
+        # Явно меняем расширение пути, чтобы yt-dlp не создал temp_video.mp4.mkv
+        path = os.path.splitext(path)[0] + '.mkv'
+    elif quality_height:
+        # Для 1080p и ниже стараемся брать MP4 (H.264) для совместимости.
+        # Format 397 (AV1) в MP4 может вызывать ошибки постпроцессинга на старых ffmpeg.
+        # Поэтому явно приоритезируем avc (h264).
+        fmt_str = (
+            f'bestvideo[height={quality_height}][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/'  # Лучший H.264
+            f'bestvideo[height={quality_height}][ext=mp4]+bestaudio[ext=m4a]/'                # Любой MP4 (вкл AV1)
+            f'best[height={quality_height}][ext=mp4]/'                                        # Одиночный MP4
+            f'bestvideo[height={quality_height}]+bestaudio/'                                  # Fallback: любой контейнер
+            f'best[height={quality_height}]'                                                  # Fallback: одиночный файл
+        )
+        ext = 'mp4'
     else:
-        # По умолчанию: Максимальное качество
-        fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        # По умолчанию тоже стараемся avc, если это mp4
+        fmt_str = 'bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        ext = 'mp4'
 
     pbar = None
     
@@ -187,19 +242,23 @@ def download_video(url, path, quality_height=None):
                 'no_warnings': True,
                 'logger': Logger(),
                 'progress_hooks': [hook],
-                'merge_output_format': 'mp4',
+                'merge_output_format': ext,
                 # Важно: nopart=True предотвращает создание .part файлов.
                 # Это критично для Windows, так как переименование .part файла может вызвать ошибку доступа (WinError 32),
                 # если файл всё еще удерживается антивирусом или системой.
                 'nopart': True,
-                'ffmpeg_location': get_binary_path('ffmpeg') or 'ffmpeg'
+                'nopart': True,
+                'ffmpeg_location': get_binary_path('ffmpeg') or 'ffmpeg',
+                'retries': 10,
+                'fragment_retries': 10,
+                'retry_sleep': 5,
             }
 
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 if pbar and not pbar.disable:
                     pbar.close()
-                return info.get('duration', 0), info.get('height', 0)
+                return info.get('duration', 0), info.get('height', 0), path
 
         except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError, ValueError) as e:
             if pbar and not pbar.disable:
@@ -211,10 +270,26 @@ def download_video(url, path, quality_height=None):
                 # print(f"{YELLOW}Текст ошибки: {e}{RESET}")
                 # print(f"{GREEN}Продолжаем обработку скачанного файла...{RESET}")
                 # Молча возвращаем успех, так как файл есть
-                return 0, (quality_height if quality_height else 0)
+                return 0, (quality_height if quality_height else 0), path
 
             error_msg = getattr(e, 'msg', str(e))
-            if not ask_to_retry(f"Сетевая ошибка при скачивании видео: {error_msg}"):
+            error_msg = getattr(e, 'msg', str(e))
+            
+            # Если ошибка 416 (Range Not Satisfiable) или проблемы с кодеком, то продолжение невозможно.
+            # Нужно удалить частично скачанные/битые файлы перед повтором.
+            is_critical = "416" in error_msg or "codec parameters" in error_msg
+            
+            if is_critical or not ask_to_retry(f"Сетевая ошибка при скачивании видео: {error_msg}"):
+                if is_critical:
+                    # Если ошибка критическая для файла, спрашиваем пользователя о ПЕРЕЗАПУСКЕ с нуля
+                    if ask_to_retry(f"Критическая ошибка файла ({error_msg}).\n{YELLOW}Очистить временные файлы и скачать заново?"):
+                        print(f"{YELLOW}Очистка временных файлов видео...{RESET}")
+                        clean_video_partials()
+                        continue
+                
+                print(f"{RED}Завершение работы по требованию пользователя.{RESET}")
+                cleanup(True)
+                sys.exit(1)
                 print(f"{RED}Завершение работы по требованию пользователя.{RESET}")
                 cleanup(True)
                 sys.exit(1)
@@ -265,7 +340,7 @@ def ask_merge_mode():
         except (KeyboardInterrupt, EOFError):
             return 2
 
-def build_ffmpeg_command(mode, final_path):
+def build_ffmpeg_command(mode, final_path, is_mkv=False):
     ffmpeg_exec = get_binary_path('ffmpeg') or 'ffmpeg'
     
     base_cmd = [
@@ -302,8 +377,10 @@ def build_ffmpeg_command(mode, final_path):
             '-map', '0:a',        # Аудио оригинала (Дорожка 1)
             '-map', '1:a',        # Аудио перевода (Дорожка 2)
             '-c', 'copy',         # Всё копируем без перекодирования
-            '-bsf:a', 'aac_adtstoasc' # Исправление для AAC в MP4
         ]
+        if not is_mkv:
+            cmd_end.append('-bsf:a:0')
+            cmd_end.append('aac_adtstoasc')
     else: # Режим 1 (Fallback / Dub only, если вернем его)
         # Просто копируем видео и аудио перевода
         cmd_end = [
@@ -311,7 +388,6 @@ def build_ffmpeg_command(mode, final_path):
             '-map', '1:a', 
             '-map', '0:a?', # Опционально оригинал, если есть?
             '-c', 'copy',
-            '-bsf:a', 'aac_adtstoasc'
         ]
         
     if False: # args.fast removed from helper signature, assume passed globally or ignored here? 
@@ -430,7 +506,12 @@ def get_user_input_and_info(args):
     selected_quality = args.quality
     
     # Всегда получаем информацию о видео (включая duration)
-    qualities, title, uploader, duration = get_available_qualities(url)
+    qualities, title, uploader, duration, language = get_available_qualities(url)
+    
+    # Если качество указано аргументом, но его нет в списке доступных — сбрасываем выбор
+    if selected_quality and selected_quality not in qualities:
+        print(f"{YELLOW}⚠️ Качество {selected_quality}p недоступно для этого видео.{RESET}")
+        selected_quality = None
     
     if not selected_quality and qualities:
         print(f"🎥 {title}")
@@ -446,7 +527,7 @@ def get_user_input_and_info(args):
         except (ValueError, IndexError, EOFError, KeyboardInterrupt):
             pass 
     
-    return url, selected_quality, title, uploader, duration
+    return url, selected_quality, title, uploader, duration, language
 
 def get_translation_audio(url, duration):
     """Использует vot.py для получения перевода, ожидает готовности и скачивает."""
@@ -556,14 +637,28 @@ def core_logic():
     # Получаем всю информацию сразу (title, uploader, duration),
     # чтобы знать длительность видео для запроса перевода.
     # Это позволяет избежать лишних запросов и ошибок с несоответствием длины.
-    url, selected_quality, title, uploader, duration = get_user_input_and_info(args)
+    url, selected_quality, title, uploader, duration, language = get_user_input_and_info(args)
     if not duration: duration = 341.0 # Fallback
 
-    # Сначала пробуем получить перевод. Это наиболее вероятная точка отказа,
-    # поэтому делаем это ДО скачивания тяжелого видеофайла.
-    translation_success = get_translation_audio(url, duration)
+    translation_success = False
+    skip_translation = False
+
+    # Проверка языка видео
+    if language and (language.startswith('ru') or language == 'Russian'):
+        print(f"\n{YELLOW}⚠️  Видео определено как русскоязычное ({language}).{RESET}")
+        if ask_yes_no(f"Скачать оригинал без перевода?"):
+            skip_translation = True
+        else:
+            print(f"{YELLOW}Операция отменена.{RESET}")
+            cleanup()
+            return
     
-    if not translation_success:
+    if not skip_translation:
+        # Сначала пробуем получить перевод. Это наиболее вероятная точка отказа,
+        # поэтому делаем это ДО скачивания тяжелого видеофайла.
+        translation_success = get_translation_audio(url, duration)
+    
+    if not translation_success and not skip_translation:
         # Перевод не найден, спрашиваем пользователя
         print(f"\n{YELLOW}⚠️ Перевод не найден.{RESET}")
         save_original = False
@@ -585,9 +680,24 @@ def core_logic():
 
     # Если перевод найден (или пользователь согласился качать оригинал),
     # приступаем к загрузке видео. Используем yt-dlp с прогресс-баром.
-    print(f"\n{YELLOW}[2/3] Загрузка видео...{RESET}")
+    step_label = "[2/3]"
+    if skip_translation:
+        step_label = "[1/1]"
+    elif not translation_success:
+        step_label = "[2/2]"
+
+    print(f"\n{YELLOW}{step_label} Загрузка видео...{RESET}")
     # duration уже получен ранее (для перевода), но yt-dlp вернет точный
-    _, actual_height = download_video(url, TEMP_VIDEO, selected_quality)
+    # current_path - это актуальный путь к файлу (temp_video.mkv или temp_video.mp4)
+    _, actual_height, current_path = download_video(url, TEMP_VIDEO, selected_quality)
+    
+    # Определяем расширение из реально созданного файла
+    if current_path.endswith('.mkv'):
+        ext = 'mkv'
+    else:
+        ext = 'mp4'
+
+
 
     # Используем FFmpeg для объединения видео и аудио.
     # В зависимости от режима, либо просто копируем потоки, либо используем фильтр amix.
@@ -611,19 +721,33 @@ def core_logic():
         # Разрешение
         res_str = f"[{actual_height}p]" if actual_height else ""
         
-        name = f"{clean_name(uploader)} - {clean_name(title)} {res_str}{mode_str}.mp4"
+        # Для финального файла используем то же расширение, что и для видео
+        name = f"{clean_name(uploader)} - {clean_name(title)} {res_str}{mode_str}.{ext}"
         final_path = os.path.join(args.output, name)
         
         # --- Проверка существования ---
         final_path = handle_existing_file(final_path)
+        
+        # Передаем актуальный путь к временному видео и флаг формата
+        
+        cmd_list = build_ffmpeg_command(mode, final_path, is_mkv=(ext=='mkv'))
+        
+        # Подмена input файла в команде (TEMP_VIDEO -> current_path)
+        try:
+            # TEMP_VIDEO константа "temp_video.mp4". 
+            # build_ffmpeg_command добавляет её в список.
+            # Находим и заменяем на реальный путь.
+            idx = cmd_list.index(TEMP_VIDEO)
+            cmd_list[idx] = current_path
+        except ValueError:
+            pass 
             
-        cmd_list = build_ffmpeg_command(mode, final_path)
         run_ffmpeg(cmd_list, duration, mode_name)
     else:
         # Просто копируем скачанное видео
         # Если перевод не удался, режима нет (Original)
         res_str = f"[{actual_height}p]" if actual_height else ""
-        name = f"{clean_name(uploader)} - {clean_name(title)} {res_str}.mp4"
+        name = f"{clean_name(uploader)} - {clean_name(title)} {res_str}.{ext}"
         final_path = os.path.join(args.output, name)
         
         # --- Проверка существования ---
@@ -631,7 +755,7 @@ def core_logic():
         
         print(f"Копирование файла в '{final_path}'...")
         try:
-            shutil.copy(TEMP_VIDEO, final_path)
+            shutil.copy(current_path, final_path)
         except Exception as e:
              print(f"{RED}❌ Не удалось скопировать файл: {e}{RESET}")
 

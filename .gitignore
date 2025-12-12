@@ -28,3 +28,6 @@ temp_*
 # IDE
 .vscode/
 .idea/
+
+# Debug scripts
+debug_*.py
