@@ -427,6 +427,11 @@ def build_ffmpeg_command(mode, final_path, is_mkv=False):
             '-map', '0:a',        # Аудио оригинала (Дорожка 1)
             '-map', '1:a',        # Аудио перевода (Дорожка 2)
             '-c', 'copy',         # Всё копируем без перекодирования
+            '-metadata:s:a:0', 'title=Original',
+            '-metadata:s:a:0', 'handler_name=Original',
+            '-metadata:s:a:1', 'title=Русский',
+            '-metadata:s:a:1', 'handler_name=Русский',
+            '-metadata:s:a:1', 'language=rus',
         ]
         if not is_mkv:
             cmd_end.append('-bsf:a:0')
