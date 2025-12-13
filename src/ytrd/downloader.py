@@ -1,0 +1,254 @@
+import os
+import sys
+import requests
+import yt_dlp
+import shutil
+from tqdm import tqdm
+from . import config
+from . import utils
+
+class Logger:
+    def debug(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): print(f"{config.COLOR_RED}{msg}{config.COLOR_RESET}")
+
+def process_audio_only(url, args, skip_translation, translation_success, uploader, title, file_exists_callback=None):
+    """Handles the 'audio only' workflow."""
+    if skip_translation:
+         print(f"\n{config.COLOR_YELLOW}[1/1] Загрузка оригинального аудио...{config.COLOR_RESET}")
+         name = f"{utils.clean_name(uploader)} - {utils.clean_name(title)} [Original].mp3"
+         final_path = os.path.join(args.output, name)
+         if file_exists_callback:
+             final_path = file_exists_callback(final_path)
+         
+         if download_youtube_audio(url, final_path):
+             print(f"\n{config.COLOR_GREEN}✅ Готово!{config.COLOR_RESET}")
+             print(f"📂 {final_path}")
+         else:
+             print(f"{config.COLOR_RED}❌ Не удалось скачать аудио.{config.COLOR_RESET}")
+
+    elif translation_success:
+        print(f"\n{config.COLOR_YELLOW}[2/2] Сохранение аудио...{config.COLOR_RESET}")
+        name = f"{utils.clean_name(uploader)} - {utils.clean_name(title)} [AudioTranslation].mp3"
+        final_path = os.path.join(args.output, name)
+        if file_exists_callback:
+             final_path = file_exists_callback(final_path)
+        
+        try:
+            shutil.copy(config.TEMP_AUDIO_FILENAME, final_path)
+            print(f"\n{config.COLOR_GREEN}✅ Готово!{config.COLOR_RESET}")
+            print(f"📂 {final_path}")
+        except Exception as e:
+            print(f"{config.COLOR_RED}❌ Не удалось сохранить аудио: {e}{config.COLOR_RESET}")
+    else:
+        print(f"{config.COLOR_RED}❌ Перевод не найден. Скачивание аудио отменено.{config.COLOR_RESET}")
+    
+    utils.cleanup()
+    return
+
+@utils.retry_on_network_error
+def get_available_qualities(url):
+    """Gets available video resolutions, title and author."""
+    print(f"{config.COLOR_YELLOW}Анализ...{config.COLOR_RESET}")
+    opts = {'quiet': True, 'no_warnings': True, 'logger': Logger()}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        formats = info.get('formats', [])
+        heights = set()
+        for f in formats:
+            h = f.get('height')
+            if h and h > 144:
+                # Filter storyboards and non-video formats
+                vcodec = f.get('vcodec')
+                if vcodec == 'none': continue 
+                if 'storyboard' in (f.get('format_note') or ''): continue
+                
+                heights.add(h)
+        return sorted(list(heights), reverse=True), info.get('title', 'Video'), info.get('uploader', 'Unknown'), info.get('duration', 0), info.get('language')
+
+def download_video(url, path, quality_height=None, retry_callback=None):
+    """Downloads video from YouTube using yt-dlp with retry logic."""
+    # Define threshold for High-Res (anything above 1080p is considered High-Res)
+    is_high_res = quality_height and quality_height > 1080
+    
+    if is_high_res:
+        # For 4K/2K use MKV (VP9 + AAC)
+        # Remove ext=mp4 restriction for video
+        fmt_str = f'bestvideo[height={quality_height}]+bestaudio[ext=m4a]/best[height={quality_height}]/best'
+        ext = 'mkv'
+        # Explicitly change path extension so yt-dlp doesn't create temp_video.mp4.mkv
+        path = os.path.splitext(path)[0] + '.mkv'
+    elif quality_height:
+        # For 1080p and below try to take MP4 (H.264) for compatibility.
+        # Format 397 (AV1) in MP4 can cause post-processing errors on old ffmpeg.
+        # Therefore explicitly prioritize avc (h264).
+        fmt_str = (
+            f'bestvideo[height={quality_height}][ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/'  # Best H.264
+            f'bestvideo[height={quality_height}][ext=mp4]+bestaudio[ext=m4a]/'                # Any MP4 (incl AV1)
+            f'best[height={quality_height}][ext=mp4]/'                                        # Single MP4
+            f'bestvideo[height={quality_height}]+bestaudio/'                                  # Fallback: any container
+            f'best[height={quality_height}]'                                                  # Fallback: single file
+        )
+        ext = 'mp4'
+    else:
+        # By default also try avc if it is mp4
+        fmt_str = 'bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        ext = 'mp4'
+
+    pbar = None
+    
+    while True:
+        try:
+            pbar = tqdm(total=0, unit='B', unit_scale=True, unit_divisor=1024, 
+                        desc=f"[{quality_height if quality_height else 'Best'}p]", 
+                        dynamic_ncols=True, colour='blue', bar_format=config.PROGRESS_BAR_FORMAT)
+
+            def hook(d):
+                if d['status'] == 'downloading':
+                    try:
+                        total = d.get('total_bytes') or d.get('total_bytes_estimate')
+                        if total: pbar.total = int(total)
+                        pbar.n = int(d.get('downloaded_bytes', 0))
+                        pbar.refresh()
+                    except Exception: pass
+                elif d['status'] == 'finished':
+                    # Simply update to 100%, closing will be in main function
+                    if pbar.total and pbar.n < pbar.total:
+                        pbar.n = pbar.total
+                        pbar.refresh()
+
+            opts = {
+                'format': fmt_str,
+                'outtmpl': path,
+                'quiet': True,
+                'no_warnings': True,
+                'logger': Logger(),
+                'progress_hooks': [hook],
+                'merge_output_format': ext,
+                # Important: nopart=True prevents creation of .part files.
+                # This is critical for Windows, as renaming .part file can cause access error (WinError 32),
+                # if file is still held by antivirus or system.
+                'nopart': True,
+                'ffmpeg_location': utils.get_binary_path('ffmpeg') or 'ffmpeg',
+                'retries': config.RETRY_ATTEMPTS,
+                'fragment_retries': config.RETRY_FRAGMENTS,
+                'retry_sleep': config.RETRY_SLEEP_SECONDS,
+            }
+
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if pbar and not pbar.disable:
+                    pbar.close()
+                return info.get('duration', 0), info.get('height', 0), path
+
+        except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError, ValueError) as e:
+            if pbar and not pbar.disable:
+                pbar.close()
+
+            # If file downloaded but yt-dlp crashed during post-processing (e.g. response parsing)
+            if os.path.exists(path) and os.path.getsize(path) > 1024:
+                # Silently return success as file exists
+                return 0, (quality_height if quality_height else 0), path
+
+            error_msg = getattr(e, 'msg', str(e))
+            
+            # If error 416 (Range Not Satisfiable) or codec problems, continuation is impossible.
+            # Need to delete partially downloaded/corrupted files before retry.
+            is_critical = "416" in error_msg or "codec parameters" in error_msg
+            
+            # Use callback if provided, otherwise fail
+            if not retry_callback:
+                print(f"{config.COLOR_RED}Сетевая ошибка: {error_msg}{config.COLOR_RESET}")
+                sys.exit(1)
+
+            if is_critical or not retry_callback(f"Сетевая ошибка при скачивании видео: {error_msg}"):
+                if is_critical:
+                    # If critical error for file, ask user to RESTART from scratch
+                    if retry_callback(f"Критическая ошибка файла ({error_msg}).\n{config.COLOR_YELLOW}Очистить временные файлы и скачать заново?"):
+                        print(f"{config.COLOR_YELLOW}Очистка временных файлов видео...{config.COLOR_RESET}")
+                        utils.clean_video_partials()
+                        continue
+                
+                print(f"{config.COLOR_RED}Завершение работы по требованию пользователя.{config.COLOR_RESET}")
+                utils.cleanup(True)
+                sys.exit(1)
+
+def download_audio(url, path, retry_callback=None):
+    """Downloads translation audio track with retry logic."""
+    pbar = None
+    while True:
+        try:
+            r = requests.get(url, stream=True, timeout=15)
+            r.raise_for_status()
+            size = int(r.headers.get('content-length', 0))
+            
+            pbar = tqdm(total=size, unit='iB', unit_scale=True, desc="Загрузка", 
+                      dynamic_ncols=True, colour='green', bar_format=config.PROGRESS_BAR_FORMAT)
+            
+            with open(path, 'wb') as f:
+                for chunk in r.iter_content(1024):
+                    pbar.update(len(chunk))
+                    f.write(chunk)
+            
+            pbar.close()
+            return # Successful completion
+
+        except (OSError, requests.exceptions.RequestException) as e:
+            if pbar and not pbar.disable:
+                pbar.close()
+
+            error_msg = str(e)
+            if not retry_callback or not retry_callback(f"Сетевая ошибка при скачивании аудио: {error_msg}"):
+                print(f"{config.COLOR_RED}Завершение работы по требованию пользователя.{config.COLOR_RESET}")
+                utils.cleanup(True)
+                sys.exit(1)
+
+def download_youtube_audio(url, path):
+    """Downloads audio from YouTube in MP3 format."""
+    # Remove extension from path for outtmpl as converter will add .mp3
+    base_path = os.path.splitext(path)[0]
+    
+    opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': base_path + '.%(ext)s',
+        'quiet': True,
+        'no_warnings': True,
+        'logger': Logger(),
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'ffmpeg_location': utils.get_binary_path('ffmpeg') or 'ffmpeg',
+        'retries': config.RETRY_ATTEMPTS,
+        'fragment_retries': config.RETRY_FRAGMENTS,
+        'retry_sleep': config.RETRY_SLEEP_SECONDS,
+    }
+
+    # Progress bar (simplified as there is no merge here)
+    pbar = tqdm(total=0, unit='B', unit_scale=True, unit_divisor=1024, 
+                desc="[Audio]", dynamic_ncols=True, colour='green', bar_format=config.PROGRESS_BAR_FORMAT)
+    
+    def hook(d):
+        if d['status'] == 'downloading':
+            try:
+                total = d.get('total_bytes') or d.get('total_bytes_estimate')
+                if total: pbar.total = int(total)
+                pbar.n = int(d.get('downloaded_bytes', 0))
+                pbar.refresh()
+            except Exception: pass
+        elif d['status'] == 'finished':
+            if pbar.total: pbar.n = pbar.total
+            pbar.refresh()
+
+    opts['progress_hooks'] = [hook]
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+            pbar.close()
+            return True
+    except Exception as e:
+        pbar.close()
+        print(f"{config.COLOR_RED}❌ Ошибка скачивания аудио: {e}{config.COLOR_RESET}")
+        return False
