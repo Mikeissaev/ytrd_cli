@@ -6,11 +6,44 @@ import hashlib
 import time
 import json
 import re
-from urllib.parse import urlparse, parse_qs
+from . import config
+from . import utils
+from . import downloader
 
-# Configuration
-YANDEX_HMAC_KEY = b"bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf"
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 YaBrowser/24.4.0.0 Safari/537.36"
+def get_translation_audio(url, duration, step_label="[1/3]", retry_callback=None):
+    """Uses vot.py to get translation, waits for readiness and downloads."""
+    print(f"\n{config.COLOR_YELLOW}{step_label} Запрос перевода...{config.COLOR_RESET}")
+    
+    # Polling (maximum defined in config)
+    max_attempts = config.RETRY_ATTEMPTS 
+    for attempt in range(max_attempts):
+        result = translate_video(url, duration)
+        
+        if not result.get("success"):
+            print(f"{config.COLOR_RED}❌ Ошибка API перевода: {result.get('message')}{config.COLOR_RESET}")
+            return False
+            
+        status = result.get("status")
+        if status == "Ready":
+            audio_url = result.get("url")
+            if audio_url:
+                print(f"{config.COLOR_GREEN}✅ Перевод готов!{config.COLOR_RESET}")
+                downloader.download_audio(audio_url, config.TEMP_AUDIO_FILENAME, retry_callback=retry_callback)
+                return True
+            else:
+                 print(f"{config.COLOR_RED}❌ Ошибка: Статус Ready, но нет URL.{config.COLOR_RESET}")
+                 return False
+                 
+        elif status == "Waiting":
+            print(f"{config.COLOR_YELLOW}⏳ Перевод в процессе... (Попытка {attempt+1}/{max_attempts}){config.COLOR_RESET}")
+            time.sleep(config.RETRY_SLEEP_SECONDS)
+            
+        else:
+             print(f"{config.COLOR_RED}❌ Неизвестный статус или ошибка: {result.get('message')}{config.COLOR_RESET}")
+             return False
+
+    print(f"{config.COLOR_RED}❌ Время ожидания перевода истекло.{config.COLOR_RESET}")
+    return False
 
 # --- Protobuf Helpers ---
 # Minimal implementation to avoid needing 'protoc' installed
@@ -103,31 +136,6 @@ class SimpleProtobufReader:
 
 # --- Core Logic ---
 
-def get_video_id(url):
-    """
-    Extracts YouTube video ID from URL.
-    """
-    try:
-        parsed_url = urlparse(url)
-    except Exception:
-        return None
-
-    if parsed_url.netloc in ["youtu.be"]:
-        return parsed_url.path.lstrip("/")
-    
-    if parsed_url.netloc in ["www.youtube.com", "youtube.com", "m.youtube.com"]:
-        if parsed_url.path == "/watch":
-            params = parse_qs(parsed_url.query)
-            return params.get("v", [None])[0]
-        if parsed_url.path.startswith("/embed/"):
-            return parsed_url.path.split("/")[2]
-        if parsed_url.path.startswith("/v/"):
-            return parsed_url.path.split("/")[2]
-        if parsed_url.path.startswith("/shorts/"):
-            return parsed_url.path.split("/")[2]
-            
-    return None
-
 def get_uuid():
     return str(uuid.uuid4()).replace("-", "")
 
@@ -135,23 +143,23 @@ def get_signature(body):
     """
     Calculates HMAC SHA256 signature for the request body.
     """
-    signature = hmac.new(YANDEX_HMAC_KEY, body, hashlib.sha256).hexdigest()
+    signature = hmac.new(config.VOT_HMAC_KEY, body, hashlib.sha256).hexdigest()
     return signature
 
 
 def translate_video(url, duration=341.0):
-    video_id = get_video_id(url)
+    video_id = utils.extract_video_id(url)
     if not video_id:
         return {"success": False, "message": "Invalid YouTube URL"}
 
-    # Видео ID используется только для валидации, но сам запрос требует URL
+    # Video ID is used for validation only, but the request itself requires URL
     
     body = b""
     body += encode_string(3, url)
     body += encode_bool(5, True)
     body += encode_double(6, float(duration))
     body += encode_int32(7, 1)
-    body += encode_string(8, "en") # Request Lang (обычно определяется автоматически или 'en')
+    body += encode_string(8, "en") # Request Lang (usually detected automatically or 'en')
     body += encode_int32(9, 0)
     body += encode_int32(10, 0)
     body += encode_string(14, "ru") # Response Lang
@@ -163,7 +171,7 @@ def translate_video(url, duration=341.0):
         "Accept": "application/x-protobuf",
         "Accept-Language": "en",
         "Content-Type": "application/x-protobuf",
-        "User-Agent": USER_AGENT,
+        "User-Agent": config.HTTP_USER_AGENT,
         "Vtrans-Signature": get_signature(body),
         "Sec-Vtrans-Token": get_uuid()
     }
