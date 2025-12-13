@@ -13,7 +13,7 @@ dist/
 build/
 *.egg-info/
 
-# Temp files for ytrd_cli
+# Temp files for ytrd
 temp_*
 *.temp.*
 *.part
