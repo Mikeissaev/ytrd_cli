@@ -15,9 +15,9 @@ import glob
 from . import vot
 from tqdm import tqdm
 from pathlib import Path
+from ytrd import __version__
 import platform
 
-# --- НАСТРОЙКИ ---
 # --- НАСТРОЙКИ ---
 def get_default_output_dir():
     """Возвращает путь к папке загрузок в зависимости от ОС."""
@@ -703,6 +703,7 @@ def core_logic():
     
     # Добавляем стандартный help с русским описанием
     parser.add_argument("-h", "--help", action="help", help="Показать это сообщение справки и выйти")
+    parser.add_argument("-v", "--version", action="version", version=f"ytrd {__version__}", help="Показать версию программы и выйти")
     
     parser.add_argument("url", nargs="?", help="Ссылка на видео YouTube.\nЕсли не указана, скрипт запросит её при запуске.")
     parser.add_argument("-o", "--output", default=OUTPUT_DIR, help=f"Папка для сохранения видео.\nПо умолчанию: {OUTPUT_DIR}")
