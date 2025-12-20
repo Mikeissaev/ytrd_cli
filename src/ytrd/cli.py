@@ -79,6 +79,90 @@ def handle_existing_file(path):
             utils.cleanup()
             sys.exit(0)
 
+def ask_subtitle_error_action():
+    """Asks user what to do if subtitle download fails."""
+    print(f"\n{config.COLOR_YELLOW}Не удалось скачать субтитры. Действия:{config.COLOR_RESET}")
+    print("  [1] Попробовать снова")
+    print("  [2] Использовать cookies (для обхода rate limiting)")
+    print("  [3] Продолжить без субтитров")
+    print("  [4] Отмена")
+    
+    while True:
+        try:
+            choice = input("Выбор: ").strip()
+            if not choice: continue
+            
+            if choice == '1':
+                return 'retry'
+            elif choice == '2':
+                return 'retry_with_cookies'
+            elif choice == '3':
+                return 'skip'
+            elif choice == '4':
+                return 'cancel'
+        except (KeyboardInterrupt, EOFError):
+            return 'cancel'
+
+def ask_cookies_path():
+    """Asks user for cookies file path or direct paste."""
+    print(f"\n{config.COLOR_CYAN}Укажите путь к файлу cookies или вставьте содержимое (Ctrl+V):{config.COLOR_RESET}")
+    print(f"{config.COLOR_YELLOW}• Путь к файлу: C:\\\\cookies.txt{config.COLOR_RESET}")
+    print(f"{config.COLOR_YELLOW}• Или вставьте cookies (многострочный ввод, Enter дважды для завершения){config.COLOR_RESET}")
+    
+    while True:
+        try:
+            first_line = input("Ввод: ").strip().strip('"').strip("'")
+            if not first_line:
+                continue
+            
+            # Check if it's a file path
+            if os.path.exists(first_line):
+                # Copy to persistent location for future use
+                try:
+                    import shutil
+                    shutil.copy(first_line, config.COOKIES_FILE_PATH)
+                    print(f"{config.COLOR_GREEN}✅ Cookies сохранены для дальнейшего использования.{config.COLOR_RESET}")
+                except Exception as e:
+                    print(f"{config.COLOR_YELLOW}⚠️ Не удалось сохранить cookies: {e}{config.COLOR_RESET}")
+                return first_line
+            
+            # Check if it looks like cookies content (starts with # Netscape HTTP Cookie File or contains tab-separated values)
+            if first_line.startswith("#") or "\t" in first_line:
+                print(f"{config.COLOR_YELLOW}Обнаружен ввод cookies. Продолжайте вставку (Enter дважды для завершения):{config.COLOR_RESET}")
+                
+                lines = [first_line]
+                empty_count = 0
+                
+                while True:
+                    try:
+                        line = input()
+                        if not line.strip():
+                            empty_count += 1
+                            if empty_count >= 2:
+                                break
+                        else:
+                            empty_count = 0
+                            lines.append(line)
+                    except EOFError:
+                        break
+                
+                # Save to persistent cookies file
+                try:
+                    with open(config.COOKIES_FILE_PATH, 'w', encoding='utf-8') as f:
+                        f.write('\n'.join(lines))
+                    
+                    print(f"{config.COLOR_GREEN}✅ Cookies сохранены: {config.COOKIES_FILE_PATH}{config.COLOR_RESET}")
+                    print(f"{config.COLOR_CYAN}💡 В следующий раз они будут использованы автоматически.{config.COLOR_RESET}")
+                    return config.COOKIES_FILE_PATH
+                except Exception as e:
+                    print(f"{config.COLOR_RED}❌ Не удалось сохранить cookies: {e}{config.COLOR_RESET}")
+                    return None
+            else:
+                print(f"{config.COLOR_RED}❌ Файл не найден и это не похоже на cookies. Попробуйте снова.{config.COLOR_RESET}")
+        except (KeyboardInterrupt, EOFError):
+            return None
+
+
 def validate_args_compatibility(args):
     """Checks arguments compatibility. If conflict exists, resets them."""
     reset_needed = False
@@ -98,7 +182,9 @@ def validate_args_compatibility(args):
         args.mix = False
         args.dual = False
         args.quality = None
+        args.quality = None
         args.audio = False
+        args.subtitles = False
     return args
 
 class RussianArgumentParser(argparse.ArgumentParser):
@@ -123,6 +209,7 @@ def parse_arguments():
   ytrd https://youtu.be/VIDEO_ID -m       # Режим смешивания (оригинал 20% + перевод 120%).
   ytrd https://youtu.be/VIDEO_ID -d       # Режим двух дорожек (Dual)
   ytrd https://youtu.be/VIDEO_ID -q 1080  # Скачать 1080p
+  ytrd https://youtu.be/VIDEO_ID -s       # Скачать с субтитрами
     """
     
     parser = RussianArgumentParser(
@@ -146,6 +233,7 @@ def parse_arguments():
     parser.add_argument("-d", "--dual", action="store_true", help="Режим двух дорожек (Dual).\nСохраняет оригинальное аудио и перевод как отдельные переключаемые дорожки.")
     parser.add_argument("-q", "--quality", type=int, help="Предпочитаемое качество видео (высота строки).\nПример: 1080, 720, 480.\nЕсли не указано, будет предложен выбор.")
     parser.add_argument("-a", "--audio", action="store_true", help="Режим 'Только аудио'.\nСкачивает только переведенную аудиодорожку (mp3).")
+    parser.add_argument("-s", "--subtitles", action="store_true", help="Скачать и вшить русские субтитры (если доступны).")
     
     args = parser.parse_args()
     return validate_args_compatibility(args)

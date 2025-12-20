@@ -9,6 +9,10 @@ TERMUX_BIN_PATH = os.path.join(TERMUX_PREFIX_PATH, "bin")
 TEMP_VIDEO_FILENAME = "temp_video.mp4"
 TEMP_AUDIO_FILENAME = "temp_audio.mp3"
 
+# --- Cookies ---
+# Save cookies in user's home directory for persistence
+COOKIES_FILE_PATH = os.path.join(Path.home(), '.ytrd_cookies.txt')
+
 # --- Colors ---
 COLOR_CYAN = "\033[96m"
 COLOR_GREEN = "\033[92m"

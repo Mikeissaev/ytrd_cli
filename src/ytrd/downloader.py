@@ -134,7 +134,7 @@ def download_video(url, path, quality_height=None, retry_callback=None):
                 'fragment_retries': config.RETRY_FRAGMENTS,
                 'retry_sleep': config.RETRY_SLEEP_SECONDS,
             }
-
+            
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 if pbar and not pbar.disable:
@@ -252,3 +252,84 @@ def download_youtube_audio(url, path):
         pbar.close()
         print(f"{config.COLOR_RED}❌ Ошибка скачивания аудио: {e}{config.COLOR_RESET}")
         return False
+
+def download_subtitles(url, base_path, cookies_path=None):
+    """
+    Downloads subtitles separately. Tries Russian first, then English as fallback.
+    Returns tuple (path, language) if successful, else (None, None).
+    
+    Args:
+        url: YouTube video URL
+        base_path: Base path for subtitle file (without extension)
+        cookies_path: Optional path to cookies file (Netscape format)
+    """
+    # Auto-detect persistent cookies if not explicitly provided
+    if not cookies_path and os.path.exists(config.COOKIES_FILE_PATH):
+        cookies_path = config.COOKIES_FILE_PATH
+        print(f"{config.COLOR_CYAN}🔐 Используются сохраненные cookies{config.COLOR_RESET}")
+    
+    if cookies_path:
+        print(f"{config.COLOR_YELLOW}Скачивание субтитров с cookies...{config.COLOR_RESET}")
+    else:
+        print(f"{config.COLOR_YELLOW}Скачивание субтитров...{config.COLOR_RESET}")
+    
+    # We want to name subs same as video base path
+    # yt-dlp will add .ru.vtt or .en.vtt etc.
+    # We use skip_download=True so we ONLY get subs.
+    
+    # Try Russian first, then English
+    languages_to_try = [
+        ('ru', 'rus', 'Русский'),
+        ('en', 'eng', 'English')
+    ]
+    
+    for lang_code, lang_meta, lang_name in languages_to_try:
+        try:
+            opts = {
+                'skip_download': True,
+                'writesubtitles': True,
+                'subtitleslangs': [lang_code],
+                'writeautomaticsub': True,
+                'outtmpl': base_path, # will append .vtt / .srt
+                'quiet': True,
+                'no_warnings': True,
+                'logger': Logger(),
+                'retries': 2,
+                'retry_sleep': 3,
+            }
+            
+            # Add cookies if provided
+            if cookies_path:
+                opts['cookiefile'] = cookies_path
+            
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+                
+            # Check what was created
+            # Expected: base_path + .ru.vtt/srt or .en.vtt/srt
+            candidates = [f"{base_path}.{lang_code}.vtt", f"{base_path}.{lang_code}.srt"]
+            for c in candidates:
+                if os.path.exists(c):
+                    if lang_code != 'ru':
+                        print(f"{config.COLOR_CYAN}ℹ️ Русские субтитры не найдены, используются {lang_name}.{config.COLOR_RESET}")
+                    return c, lang_meta  # Return path and language code for metadata
+            
+        except Exception as e:
+            error_str = str(e)
+            
+            # Check if it's a rate limiting error (429) or forbidden (403)
+            is_rate_limit = "429" in error_str or "Too Many Requests" in error_str
+            is_forbidden = "403" in error_str or "Forbidden" in error_str
+            
+            if is_rate_limit or is_forbidden:
+                # Only show error on first attempt (Russian)
+                if lang_code == 'ru':
+                    print(f"{config.COLOR_YELLOW}⚠️ Превышен лимит запросов YouTube (HTTP 429). Попробуйте позже.{config.COLOR_RESET}")
+                return None, None
+            # For other errors, try next language
+            continue
+    
+    # If no subtitles found in any language
+    print(f"{config.COLOR_YELLOW}⚠️ Ошибка при скачивании субтитров: субтитры не найдены{config.COLOR_RESET}")
+    return None, None
+

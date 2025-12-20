@@ -72,6 +72,20 @@ def run_pipeline():
     elif not translation_success:
         step_label = "[2/2]"
 
+    # Subtitles logic
+    download_subs = False
+    if args.subtitles:
+        download_subs = True
+    elif not is_audio_only and not skip_translation: # Ask if not audio-only and not forcing original? Or maybe always ask?
+        # User requested logic: "спрашивала нужнылои русские сабы"
+        # If we are in interactive mode (no specific args), we should asking.
+        # But if user run with -m or -d, should we interrupt flow?
+        # Let's act like "Ask if not specified".
+        # But to avoid annoyance, maybe only if not skip_translation?
+        # If I download original video (skip_translation=True), I might still want subs.
+        if cli.ask_yes_no("Скачать русские субтитры?"):
+             download_subs = True
+
     print(f"\n{config.COLOR_YELLOW}{step_label} Загрузка видео...{config.COLOR_RESET}")
     
     _, actual_height, current_path = downloader.download_video(
@@ -84,9 +98,47 @@ def run_pipeline():
     else:
         ext = 'mp4'
 
+    # Check for subtitles
+    sub_path = None
+    if download_subs:
+        # Separate step for subtitles to handle 429/403 errors gracefully
+        # Use base name without extension for subtitle search
+        video_base = os.path.splitext(config.TEMP_VIDEO_FILENAME)[0]
+        
+        sub_path, sub_lang = downloader.download_subtitles(url, video_base)
+        
+        if sub_path:
+            print(f"{config.COLOR_GREEN}✅ Субтитры найдены: {sub_path}{config.COLOR_RESET}")
+        else:
+            print(f"{config.COLOR_YELLOW}⚠️ Субтитры не были скачаны (возможно отсутствуют или ошибка доступа).{config.COLOR_RESET}")
+            
+            action = cli.ask_subtitle_error_action()
+            if action == 'retry':
+                # Try one more time manually
+                sub_path, sub_lang = downloader.download_subtitles(url, video_base)
+                if sub_path:
+                    print(f"{config.COLOR_GREEN}✅ Субтитры найдены: {sub_path}{config.COLOR_RESET}")
+            elif action == 'retry_with_cookies':
+                # Ask for cookies path and retry
+                cookies_path = cli.ask_cookies_path()
+                if cookies_path:
+                    sub_path, sub_lang = downloader.download_subtitles(url, video_base, cookies_path=cookies_path)
+                    if sub_path:
+                        print(f"{config.COLOR_GREEN}✅ Субтитры найдены: {sub_path}{config.COLOR_RESET}")
+                    else:
+                        print(f"{config.COLOR_YELLOW}⚠️ Не удалось скачать даже с cookies.{config.COLOR_RESET}")
+            elif action == 'skip':
+                sub_path = None
+            elif action == 'cancel':
+                print(f"{config.COLOR_YELLOW}Операция отменена пользователем.{config.COLOR_RESET}")
+                utils.cleanup()
+                sys.exit(0)
+
+
     # Delegate merging to ffmpeg module
     ffmpeg.process_video_merge(
-        current_path, ext, translation_success, uploader, title, actual_height, args, duration
+        current_path, ext, translation_success, uploader, title, actual_height, args, duration, 
+        sub_path=sub_path, sub_lang=sub_lang if sub_path else None
     )
 
 def entry_point():

@@ -8,7 +8,7 @@ from . import config
 from . import utils
 from . import cli
 
-def build_ffmpeg_command(mode, final_path, is_mkv=False):
+def build_ffmpeg_command(mode, final_path, is_mkv=False, sub_path=None, sub_lang='rus'):
     """
     Builds the FFmpeg command list based on the selected mode.
     
@@ -16,6 +16,8 @@ def build_ffmpeg_command(mode, final_path, is_mkv=False):
         mode (int): Mixing mode (1: Dub, 2: Mix, 3: Dual).
         final_path (str): Output file path.
         is_mkv (bool): Whether the output format is MKV.
+        sub_path (str, optional): Path to the subtitle file.
+        sub_lang (str, optional): Language code for subtitle metadata (e.g., 'rus', 'eng').
         
     Returns:
         list: The complete FFmpeg command as a list of arguments.
@@ -32,6 +34,9 @@ def build_ffmpeg_command(mode, final_path, is_mkv=False):
         '-i', config.TEMP_VIDEO_FILENAME,      # Input 0: Video
         '-i', config.TEMP_AUDIO_FILENAME       # Input 1: Audio (Translation)
     ]
+    
+    if sub_path:
+        base_cmd.extend(['-i', sub_path])      # Input 2: Subtitles
     
     cmd_settings = []
     
@@ -62,8 +67,9 @@ def build_ffmpeg_command(mode, final_path, is_mkv=False):
             '-map', '0:a',        # Audio 1 (Original)
             '-map', '1:a',        # Audio 2 (Translation)
             
-            # Codecs
-            '-c', 'copy',         # Copy all streams
+            # Codecs - explicit for video and audio only, not global
+            '-c:v', 'copy',       # Copy video stream
+            '-c:a', 'copy',       # Copy audio streams
             
             # Metadata: Track 1 (Original)
             '-metadata:s:a:0', 'title=Original',
@@ -84,11 +90,29 @@ def build_ffmpeg_command(mode, final_path, is_mkv=False):
             # Mapping
             '-map', '0:v',        # Video
             '-map', '1:a',        # Audio (Translation)
-            '-map', '0:a?',       # Original audio (optional/unused)
             
-            # Codecs
-            '-c', 'copy',
+            # Codecs - explicit for video and audio only
+            '-c:v', 'copy',
+            '-c:a', 'copy',
         ]
+
+    # --- Block 2.5: Subtitles ---
+    if sub_path:
+        # Check output container capability
+        if not is_mkv:
+            # MP4 supports 'mov_text', MKV supports 'srt', 'ass', etc.
+            # We assume input is VTT/SRT.
+            # For MP4 we must convert to mov_text.
+            cmd_settings.extend(['-c:s', 'mov_text'])
+        else:
+            # For MKV just copy or use srt
+            cmd_settings.extend(['-c:s', 'srt']) # Force SRT to be safe or 'copy' if input is already srt/vtt compatible
+            
+        cmd_settings.extend([
+            '-map', '2:s',
+            '-metadata:s:s:0', f'language={sub_lang}',
+            '-metadata:s:s:0', f'title={"Русский" if sub_lang == "rus" else "English"}'
+        ])
 
     # --- Block 3: Final Output Settings ---
     cmd_final = [
@@ -208,8 +232,58 @@ def run_ffmpeg(cmd_list, duration, mode_name="FFmpeg"):
         print(f"{config.COLOR_YELLOW}Убедитесь, что ffmpeg установлен и доступен в PATH.{config.COLOR_RESET}")
         sys.exit(1)
 
-def process_video_merge(current_path, ext, translation_success, uploader, title, actual_height, args, duration):
+def convert_to_srt(sub_path):
+    """
+    Converts subtitle file to SRT format if necessary.
+    Checks for file existence and size.
+    Returns path to valid SRT file, or original path if conversion failed but file exists,
+    or None if file is invalid/empty.
+    """
+    if not sub_path or not os.path.exists(sub_path):
+        return None
+    
+    if os.path.getsize(sub_path) == 0:
+        print(f"{config.COLOR_YELLOW}⚠️ Файл субтитров пуст, пропускаем.{config.COLOR_RESET}")
+        return None
+
+    # If already SRT, just return it
+    if sub_path.endswith('.srt'):
+        return sub_path
+
+    # Try to convert to SRT
+    # We create a new path for SRT
+    base_name = os.path.splitext(sub_path)[0]
+    srt_path = f"{base_name}.srt"
+    
+    ffmpeg_exec = utils.get_binary_path('ffmpeg') or 'ffmpeg'
+    try:
+        # Check if SRT already exists and is valid
+        if os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
+            return srt_path
+            
+        cmd = [ffmpeg_exec, '-y', '-loglevel', 'error', '-i', sub_path, srt_path]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        
+        if os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
+            return srt_path
+    except Exception as e:
+        # Conversion failed, print warning but return original (maybe ffmpeg can handle it)
+        # However, for MP4, VTT often fails with mov_text if not converted.
+        # But we return original as fallback.
+        print(f"{config.COLOR_YELLOW}⚠️ Не удалось конвертировать субтитры в SRT: {e}{config.COLOR_RESET}")
+        pass
+        
+    return sub_path
+
+def process_video_merge(current_path, ext, translation_success, uploader, title, actual_height, args, duration, sub_path=None, sub_lang='rus'):
     """Handles the video merging/processing workflow."""
+    
+    # Pre-process subtitles: Convert and Validate
+    if sub_path:
+        sub_path = convert_to_srt(sub_path)
+        if not sub_path:
+            print(f"{config.COLOR_YELLOW}⚠️ Субтитры были отброшены (пустой файл или ошибка).{config.COLOR_RESET}")
+
     # Use FFmpeg to merge video and audio.
     # Depending on mode, either copy streams or use amix filter.
     if translation_success:
@@ -239,7 +313,7 @@ def process_video_merge(current_path, ext, translation_success, uploader, title,
         # --- Existence check ---
         final_path = cli.handle_existing_file(final_path)
         
-        cmd_list = build_ffmpeg_command(mode, final_path, is_mkv=(ext=='mkv'))
+        cmd_list = build_ffmpeg_command(mode, final_path, is_mkv=(ext=='mkv'), sub_path=sub_path, sub_lang=sub_lang)
         
         # Substitute input file in command (config.TEMP_VIDEO_FILENAME -> current_path)
         try:
@@ -253,8 +327,8 @@ def process_video_merge(current_path, ext, translation_success, uploader, title,
             
         run_ffmpeg(cmd_list, duration, mode_name)
     else:
-        # Just copy downloaded video
-        # If translation failed, no mode (Original)
+        # No translation - just process original video
+        # If we have subtitles, need to use ffmpeg to embed them
         res_str = f"[{actual_height}p]" if actual_height else ""
         name = f"{utils.clean_name(uploader)} - {utils.clean_name(title)} {res_str}.{ext}"
         final_path = os.path.join(args.output, name)
@@ -262,11 +336,50 @@ def process_video_merge(current_path, ext, translation_success, uploader, title,
         # --- Existence check ---
         final_path = cli.handle_existing_file(final_path)
         
-        print(f"Копирование файла в '{final_path}'...")
-        try:
-            shutil.copy(current_path, final_path)
-        except Exception as e:
-             print(f"{config.COLOR_RED}❌ Не удалось скопировать файл: {e}{config.COLOR_RESET}")
+        if sub_path:
+            # Need to use ffmpeg to embed subtitles into video
+            print(f"\n{config.COLOR_YELLOW}Встраивание субтитров...{config.COLOR_RESET}")
+            
+            ffmpeg_exec = utils.get_binary_path('ffmpeg') or 'ffmpeg'
+            is_mkv = (ext == 'mkv')
+            
+            cmd_list = [
+                ffmpeg_exec,
+                '-y',
+                '-loglevel', 'quiet',
+                '-progress', 'pipe:1',
+                '-i', current_path,      # Input 0: Video
+                '-i', sub_path,          # Input 1: Subtitles
+                '-map', '0:v',           # Map only VIDEO stream from input 0
+                '-map', '0:a',           # Map only AUDIO streams from input 0
+                '-map', '1:s',           # Map subtitle stream from input 1
+                '-c:v', 'copy',          # Copy video without re-encoding
+                '-c:a', 'copy',          # Copy audio without re-encoding
+            ]
+            
+            # Subtitle codec based on container
+            if not is_mkv:
+                cmd_list.extend(['-c:s', 'mov_text'])
+            else:
+                cmd_list.extend(['-c:s', 'srt'])
+            
+            # Subtitle metadata
+            subtitle_title = "Русский" if sub_lang == 'rus' else "English"
+            cmd_list.extend([
+                '-metadata:s:s:0', f'language={sub_lang}',
+                '-metadata:s:s:0', f'title={subtitle_title}',
+                '-movflags', '+faststart',
+                final_path
+            ])
+            
+            run_ffmpeg(cmd_list, duration, "SUBTITLE")
+        else:
+            # Just copy file without processing
+            print(f"Копирование файла в '{final_path}'...")
+            try:
+                shutil.copy(current_path, final_path)
+            except Exception as e:
+                print(f"{config.COLOR_RED}❌ Не удалось скопировать файл: {e}{config.COLOR_RESET}")
 
     # --- Completion ---
     utils.cleanup()

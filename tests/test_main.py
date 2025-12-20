@@ -40,6 +40,9 @@ class TestRunPipeline:
         mock_download_video = MagicMock(return_value=(100, 1080, "temp_video.mp4"))
         monkeypatch.setattr(main.downloader, 'download_video', mock_download_video)
         
+        # Mock subtitle download
+        monkeypatch.setattr(main.downloader, 'download_subtitles', lambda url, path, cookies_path=None: ("sub.srt", "rus"))
+        
         # Mock FFmpeg (merge)
         mock_process_merge = MagicMock()
         monkeypatch.setattr(main.ffmpeg, 'process_video_merge', mock_process_merge)
@@ -73,6 +76,8 @@ class TestRunPipeline:
         
         # User says YES (skip translation)
         monkeypatch.setattr(main.cli, 'ask_yes_no', lambda text: True)
+        # Mock subtitle error action to skip
+        monkeypatch.setattr(main.cli, 'ask_subtitle_error_action', lambda: 'skip')
         
         mock_get_translation = MagicMock()
         monkeypatch.setattr(main.vot, 'get_translation_audio', mock_get_translation)
@@ -177,6 +182,8 @@ class TestRunPipeline:
         
         # User agrees to download original
         monkeypatch.setattr(main.cli, 'ask_yes_no', lambda text: True)
+        # Mock subtitle error action to skip
+        monkeypatch.setattr(main.cli, 'ask_subtitle_error_action', lambda: 'skip')
         
         mock_download_video = MagicMock(return_value=(100, 1080, "temp_video.mp4"))
         monkeypatch.setattr(main.downloader, 'download_video', mock_download_video)
@@ -254,6 +261,9 @@ class TestRunPipeline:
         
         # If interactive, mock ask_merge_mode
         monkeypatch.setattr(main.cli, 'ask_merge_mode', lambda: 2)
+        
+        # Mock subtitle error action to skip
+        monkeypatch.setattr(main.cli, 'ask_subtitle_error_action', lambda: 'skip')
         
         main.run_pipeline()
         

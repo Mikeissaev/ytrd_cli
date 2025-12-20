@@ -47,9 +47,10 @@ class TestBuildFFmpegCommand:
         assert any('language=rus' in str(arg) for arg in cmd)
         
         # Check codec is copy (no re-encoding)
-        assert '-c' in cmd
-        c_idx = cmd.index('-c')
-        assert cmd[c_idx + 1] == 'copy'
+        assert '-c:v' in cmd
+        assert cmd[cmd.index('-c:v') + 1] == 'copy'
+        assert '-c:a' in cmd
+        assert cmd[cmd.index('-c:a') + 1] == 'copy'
     
     def test_build_ffmpeg_command_dub_only_mode(self):
         """Test building command for Dub only mode (mode 1)."""
@@ -113,6 +114,79 @@ class TestBuildFFmpegCommand:
             assert 'copy' in cmd
 
 
+class TestConvertToSrt:
+    """Test suite for subtitle conversion logic."""
+
+    def test_convert_to_srt_none_or_missing(self, monkeypatch):
+        """Test with None or missing file."""
+        monkeypatch.setattr('os.path.exists', lambda x: False)
+        assert ffmpeg.convert_to_srt(None) is None
+        assert ffmpeg.convert_to_srt("missing.vtt") is None
+
+    def test_convert_to_srt_empty_file(self, monkeypatch):
+        """Test with empty file."""
+        monkeypatch.setattr('os.path.exists', lambda x: True)
+        monkeypatch.setattr('os.path.getsize', lambda x: 0)
+        assert ffmpeg.convert_to_srt("empty.vtt") is None
+
+    def test_convert_to_srt_already_srt(self, monkeypatch):
+        """Test with existing SRT file."""
+        monkeypatch.setattr('os.path.exists', lambda x: True)
+        monkeypatch.setattr('os.path.getsize', lambda x: 100) # Non-empty
+        assert ffmpeg.convert_to_srt("valid.srt") == "valid.srt"
+
+    def test_convert_to_srt_conversion_success(self, monkeypatch):
+        """Test successful VTT to SRT conversion."""
+        import subprocess
+        
+        # Mock file system: vtt exists, srt does not exist initially, then exists after conversion
+        def mock_exists(path):
+            if path.endswith('.vtt'): return True
+            if path.endswith('.srt'): return getattr(mock_exists, 'srt_created', False)
+            return False
+            
+        def mock_getsize(path):
+            if path.endswith('.vtt'): return 100
+            if path.endswith('.srt'): return 100 if getattr(mock_exists, 'srt_created', False) else 0
+            return 0
+            
+        monkeypatch.setattr('os.path.exists', mock_exists)
+        monkeypatch.setattr('os.path.getsize', mock_getsize)
+        
+        mock_run = MagicMock()
+        def side_effect(*args, **kwargs):
+            mock_exists.srt_created = True
+            
+        mock_run.side_effect = side_effect
+        monkeypatch.setattr(subprocess, 'run', mock_run)
+        
+        result = ffmpeg.convert_to_srt("test.vtt")
+        
+        assert result == "test.srt"
+        mock_run.assert_called_once()
+        args = mock_run.call_args[0][0]
+        assert '-i' in args and 'test.vtt' in args and 'test.srt' in args
+
+    def test_convert_to_srt_conversion_fails(self, monkeypatch):
+        """Test VTT to SRT conversion failure (returns original)."""
+        import subprocess
+        
+        # Only VTT exists, SRT does not
+        def mock_exists(path):
+            return path.endswith('.vtt')
+            
+        monkeypatch.setattr('os.path.exists', mock_exists)
+        monkeypatch.setattr('os.path.getsize', lambda x: 100) # vtt has size
+        
+        # Simulate subprocess error
+        monkeypatch.setattr(subprocess, 'run', MagicMock(side_effect=Exception("FFmpeg error")))
+        
+        # Should return original path if conversion fails
+        # Note: Logic in code is to return original path if exception occurs
+        result = ffmpeg.convert_to_srt("test.vtt")
+        assert result == "test.vtt"
+
+
 class TestProcessVideoMerge:
     """Test suite for video merging workflow."""
     
@@ -157,6 +231,51 @@ class TestProcessVideoMerge:
         final_path = cmd_list[-1]
         assert "[Mix]" in final_path
         assert "[1080p]" in final_path
+
+    def test_process_video_merge_drops_invalid_subs(self, monkeypatch):
+        """Test that invalid subtitles are dropped."""
+        from ytrd import cli, utils
+        
+        class MockArgs:
+            mix = True
+            dual = False
+            output = "/downloads"
+        
+        mock_run_ffmpeg = MagicMock()
+        monkeypatch.setattr(ffmpeg, 'run_ffmpeg', mock_run_ffmpeg)
+        monkeypatch.setattr(cli, 'handle_existing_file', lambda x: x)
+        monkeypatch.setattr(utils, 'cleanup', MagicMock())
+        monkeypatch.setattr('os.path.exists', lambda x: True)
+        
+        # Mock convert_to_srt to return None (simulating empty/invalid file)
+        monkeypatch.setattr(ffmpeg, 'convert_to_srt', MagicMock(return_value=None))
+        
+        # Mock build_ffmpeg_command to verify it receives None for sub_path
+        mock_build = MagicMock(wraps=ffmpeg.build_ffmpeg_command)
+        monkeypatch.setattr(ffmpeg, 'build_ffmpeg_command', mock_build)
+        
+        ffmpeg.process_video_merge(
+            "temp_video.mp4", "mp4", True,
+            "Channel", "Video", 1080,
+            MockArgs(), 341.0,
+            sub_path="invalid_empty.vtt"
+        )
+        
+        # Verify convert_to_srt was called
+        ffmpeg.convert_to_srt.assert_called_with("invalid_empty.vtt")
+        
+        # Verify build_ffmpeg_command was called with sub_path=None
+        call_kwargs = mock_build.call_args.kwargs
+        # sub_path might be in kwargs or args, check based on signature or inspection
+        # Signature: build_ffmpeg_command(mode, final_path, is_mkv=False, sub_path=None, sub_lang='rus')
+        if 'sub_path' in call_kwargs:
+            assert call_kwargs['sub_path'] is None
+        else:
+            # check args: mode, final_path, is_mkv, sub_path
+            args = mock_build.call_args[0]
+            if len(args) > 3:
+                assert args[3] is None
+
     
     def test_process_video_merge_dual_mode(self, monkeypatch):
         """Test merge workflow in Dual mode."""
