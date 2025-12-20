@@ -311,5 +311,16 @@ def get_user_input_and_info(args):
     use_live_voice = args.live
     if interactive_mode and not use_live_voice:
         use_live_voice = ask_voice_type()
+
+    mix_mode = args.mix
+    dual_mode = args.dual
+
+    # Ask for merge mode if interactive, not audio-only, and mode not specified
+    if interactive_mode and selected_quality != 'audio' and not mix_mode and not dual_mode:
+        mode_choice = ask_merge_mode()
+        if mode_choice == 2:
+            mix_mode = True
+        elif mode_choice == 3:
+            dual_mode = True
         
-    return url, selected_quality, title, uploader, duration, language, use_live_voice
+    return url, selected_quality, title, uploader, duration, language, use_live_voice, mix_mode, dual_mode

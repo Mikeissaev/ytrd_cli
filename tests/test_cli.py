@@ -271,6 +271,12 @@ class TestGetUserInputAndInfo:
             live = False
 
 
+            mix = False
+
+
+            dual = False
+
+
     
 
 
@@ -304,7 +310,7 @@ class TestGetUserInputAndInfo:
     
 
 
-        url, quality, title, uploader, duration, language, use_live = cli.get_user_input_and_info(MockArgs())
+        url, quality, title, uploader, duration, language, use_live, mix, dual = cli.get_user_input_and_info(MockArgs())
 
 
         
@@ -347,6 +353,12 @@ class TestGetUserInputAndInfo:
 
 
             live = False
+
+
+            mix = False
+
+
+            dual = False
 
 
     

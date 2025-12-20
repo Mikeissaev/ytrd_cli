@@ -19,7 +19,12 @@ def run_pipeline():
     # --- Step 1: Video Info ---
     # Get all info at once (title, uploader, duration),
     # to know video duration for translation request.
-    url, selected_quality, title, uploader, duration, language, use_live_voice = cli.get_user_input_and_info(args)
+    url, selected_quality, title, uploader, duration, language, use_live_voice, mix_mode, dual_mode = cli.get_user_input_and_info(args)
+    
+    # Update args with interactive choices
+    args.mix = mix_mode
+    args.dual = dual_mode
+    
     if not duration: duration = 341.0 # Fallback
 
     is_audio_only = (selected_quality == 'audio')
@@ -43,6 +48,7 @@ def run_pipeline():
     elif not is_audio_only: 
         # Ask if not audio-only. 
         # Previously we checked 'not skip_translation', but user might want subs even with original video.
+        print() # Visual spacing
         if cli.ask_yes_no("Скачать русские субтитры?"):
              download_subs = True
 
