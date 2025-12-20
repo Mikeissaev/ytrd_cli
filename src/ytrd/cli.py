@@ -172,9 +172,9 @@ def validate_args_compatibility(args):
         print(f"{config.COLOR_YELLOW}⚠️  Обнаружен конфликт аргументов (--mix и --dual).{config.COLOR_RESET}")
         reset_needed = True
         
-    # 2. Audio only with video options
-    if args.audio and (args.mix or args.dual or args.quality):
-         print(f"{config.COLOR_YELLOW}⚠️  Обнаружен конфликт аргументов (--audio с настройками видео).{config.COLOR_RESET}")
+    # 2. Audio only with video options or subtitles
+    if args.audio and (args.mix or args.dual or args.quality or args.subtitles):
+         print(f"{config.COLOR_YELLOW}⚠️  Обнаружен конфликт аргументов (--audio с настройками видео или субтитрами).{config.COLOR_RESET}")
          reset_needed = True
 
     if reset_needed:
@@ -234,9 +234,25 @@ def parse_arguments():
     parser.add_argument("-q", "--quality", type=int, help="Предпочитаемое качество видео (высота строки).\nПример: 1080, 720, 480.\nЕсли не указано, будет предложен выбор.")
     parser.add_argument("-a", "--audio", action="store_true", help="Режим 'Только аудио'.\nСкачивает только переведенную аудиодорожку (mp3).")
     parser.add_argument("-s", "--subtitles", action="store_true", help="Скачать и вшить русские субтитры (если доступны).")
+    parser.add_argument("-l", "--live", action="store_true", help="Использовать 'Живой голос'.\nБолее качественная и естественная озвучка.")
     
     args = parser.parse_args()
     return validate_args_compatibility(args)
+
+def ask_voice_type():
+    """Asks user about voice type (Standard or Live)."""
+    print(f"\n{config.COLOR_YELLOW}Выберите тип озвучки:{config.COLOR_RESET}")
+    print(f"  [1] Стандартный голос")
+    print(f"  [2] Живой голос (Beta)")
+    
+    while True:
+        try:
+            choice = input("Выбор [1]: ").strip()
+            if not choice: return False # Default Standard
+            if choice == '1': return False
+            if choice == '2': return True
+        except (KeyboardInterrupt, EOFError):
+            return False
 
 def get_user_input_and_info(args):
     """Gets URL, analyzes video and asks for quality."""
@@ -273,7 +289,9 @@ def get_user_input_and_info(args):
     if args.audio:
          selected_quality = 'audio'
     
+    interactive_mode = False
     if not selected_quality and qualities:
+        interactive_mode = True
         print(f"🎥 {title}")
         print(f"{config.COLOR_YELLOW}Выберите качество:{config.COLOR_RESET}")
         for i, q in enumerate(qualities, 1):
@@ -290,4 +308,8 @@ def get_user_input_and_info(args):
         except (ValueError, IndexError, EOFError, KeyboardInterrupt):
             pass 
     
-    return url, selected_quality, title, uploader, duration, language
+    use_live_voice = args.live
+    if interactive_mode and not use_live_voice:
+        use_live_voice = ask_voice_type()
+        
+    return url, selected_quality, title, uploader, duration, language, use_live_voice

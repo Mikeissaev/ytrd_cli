@@ -19,7 +19,7 @@ def run_pipeline():
     # --- Step 1: Video Info ---
     # Get all info at once (title, uploader, duration),
     # to know video duration for translation request.
-    url, selected_quality, title, uploader, duration, language = cli.get_user_input_and_info(args)
+    url, selected_quality, title, uploader, duration, language, use_live_voice = cli.get_user_input_and_info(args)
     if not duration: duration = 341.0 # Fallback
 
     is_audio_only = (selected_quality == 'audio')
@@ -36,12 +36,22 @@ def run_pipeline():
             utils.cleanup()
             return
     
+    # Subtitles logic (Ask upfront)
+    download_subs = False
+    if args.subtitles:
+        download_subs = True
+    elif not is_audio_only: 
+        # Ask if not audio-only. 
+        # Previously we checked 'not skip_translation', but user might want subs even with original video.
+        if cli.ask_yes_no("Скачать русские субтитры?"):
+             download_subs = True
+
     if not skip_translation:
         # First try to get translation.
         label = "[1/2]" if is_audio_only else "[1/3]"
         # Call vot.get_translation_audio which handles polling and downloading
         translation_success = vot.get_translation_audio(
-            url, duration, label, retry_callback=cli.ask_to_retry
+            url, duration, label, retry_callback=cli.ask_to_retry, use_live_voice=use_live_voice
         )
     
     if is_audio_only:
@@ -71,20 +81,6 @@ def run_pipeline():
         step_label = "[1/1]"
     elif not translation_success:
         step_label = "[2/2]"
-
-    # Subtitles logic
-    download_subs = False
-    if args.subtitles:
-        download_subs = True
-    elif not is_audio_only and not skip_translation: # Ask if not audio-only and not forcing original? Or maybe always ask?
-        # User requested logic: "спрашивала нужнылои русские сабы"
-        # If we are in interactive mode (no specific args), we should asking.
-        # But if user run with -m or -d, should we interrupt flow?
-        # Let's act like "Ask if not specified".
-        # But to avoid annoyance, maybe only if not skip_translation?
-        # If I download original video (skip_translation=True), I might still want subs.
-        if cli.ask_yes_no("Скачать русские субтитры?"):
-             download_subs = True
 
     print(f"\n{config.COLOR_YELLOW}{step_label} Загрузка видео...{config.COLOR_RESET}")
     

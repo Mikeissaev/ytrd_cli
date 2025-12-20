@@ -10,14 +10,14 @@ from . import config
 from . import utils
 from . import downloader
 
-def get_translation_audio(url, duration, step_label="[1/3]", retry_callback=None):
+def get_translation_audio(url, duration, step_label="[1/3]", retry_callback=None, use_live_voice=False):
     """Uses vot.py to get translation, waits for readiness and downloads."""
-    print(f"\n{config.COLOR_YELLOW}{step_label} Запрос перевода...{config.COLOR_RESET}")
+    print(f"\n{config.COLOR_YELLOW}{step_label} Запрос перевода{' (Живой голос)' if use_live_voice else ''}...{config.COLOR_RESET}")
     
     # Polling (maximum defined in config)
     max_attempts = config.RETRY_ATTEMPTS 
     for attempt in range(max_attempts):
-        result = translate_video(url, duration)
+        result = translate_video(url, duration, use_live_voice)
         
         if not result.get("success"):
             print(f"{config.COLOR_RED}❌ Ошибка API перевода: {result.get('message')}{config.COLOR_RESET}")
@@ -147,7 +147,7 @@ def get_signature(body):
     return signature
 
 
-def translate_video(url, duration=341.0):
+def translate_video(url, duration=341.0, use_live_voice=False):
     video_id = utils.extract_video_id(url)
     if not video_id:
         return {"success": False, "message": "Invalid YouTube URL"}
@@ -164,8 +164,10 @@ def translate_video(url, duration=341.0):
     body += encode_int32(10, 0)
     body += encode_string(14, "ru") # Response Lang
     body += encode_int32(15, 0)
-    body += encode_int32(16, 1)
+    body += encode_int32(16, 2)
     body += encode_int32(17, 0)
+    body += encode_bool(18, use_live_voice)
+    body += encode_string(19, "") # Video Title
 
     headers = {
         "Accept": "application/x-protobuf",

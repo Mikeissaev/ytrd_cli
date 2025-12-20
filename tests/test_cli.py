@@ -236,48 +236,144 @@ class TestHandleExistingFile:
 
 
 class TestGetUserInputAndInfo:
+
+
     """Test suite for user input gathering."""
+
+
     
+
+
     def test_get_user_input_with_url_in_args(self, monkeypatch, mock_youtube_dl_success):
+
+
         """Test when URL is provided in arguments."""
+
+
         from ytrd import downloader
-        
-        class MockArgs:
-            url = "https://youtu.be/test"
-            quality = None
-            audio = False
-        
-        # Mock downloader.get_available_qualities
-        monkeypatch.setattr(
-            downloader, 
-            'get_available_qualities',
-            lambda url: ([1080, 720], "Test Video", "Test Channel", 341.0, "en")
-        )
-        
-        # Mock user selecting quality 1
-        monkeypatch.setattr('builtins.input', lambda _: '1')
-        
-        url, quality, title, uploader, duration, language = cli.get_user_input_and_info(MockArgs())
-        
-        assert url == "https://youtu.be/test"
-        assert quality == 1080
-        assert title == "Test Video"
+
+
     
-    def test_get_user_input_audio_mode(self, monkeypatch, mock_youtube_dl_success):
-        """Test audio-only mode sets quality to 'audio'."""
-        from ytrd import downloader
-        
+
+
         class MockArgs:
+
+
             url = "https://youtu.be/test"
+
+
             quality = None
-            audio = True
-        
+
+
+            audio = False
+
+
+            live = False
+
+
+    
+
+
+        # Mock downloader.get_available_qualities
+
+
         monkeypatch.setattr(
+
+
             downloader,
+
+
             'get_available_qualities',
-            lambda url: ([1080, 720], "Test", "Ch", 100.0, "en")
+
+
+            lambda url: ([1080, 720], "Test Video", "Test Channel", 341.0, "en")
+
+
         )
+
+
+    
+
+
+        # Mock user selecting quality 1
+
+
+        monkeypatch.setattr('builtins.input', lambda _: '1')
+
+
+    
+
+
+        url, quality, title, uploader, duration, language, use_live = cli.get_user_input_and_info(MockArgs())
+
+
         
+
+
+        assert url == "https://youtu.be/test"
+
+
+        assert quality == 1080
+
+
+        assert title == "Test Video"
+
+
+    
+
+
+    def test_get_user_input_audio_mode(self, monkeypatch, mock_youtube_dl_success):
+
+
+        """Test audio-only mode sets quality to 'audio'."""
+
+
+        from ytrd import downloader
+
+
+    
+
+
+        class MockArgs:
+
+
+            url = "https://youtu.be/test"
+
+
+            quality = None
+
+
+            audio = True
+
+
+            live = False
+
+
+    
+
+
+        monkeypatch.setattr(
+
+
+            downloader,
+
+
+            'get_available_qualities',
+
+
+            lambda url: ([1080, 720], "Test", "Ch", 100.0, "en")
+
+
+        )
+
+
+    
+
+
         url, quality, *rest = cli.get_user_input_and_info(MockArgs())
+
+
         
+
+
         assert quality == 'audio'

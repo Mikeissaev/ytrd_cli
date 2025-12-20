@@ -29,7 +29,7 @@ class TestRunPipeline:
         # Mock user input
         monkeypatch.setattr(
             main.cli, 'get_user_input_and_info',
-            lambda args: ("http://url", 1080, "Title", "Uploader", 100.0, "en")
+            lambda args: ("http://url", 1080, "Title", "Uploader", 100.0, "en", False)
         )
         
         # Mock VOT (translation)
@@ -71,7 +71,7 @@ class TestRunPipeline:
         # Language detected as Russian
         monkeypatch.setattr(
             main.cli, 'get_user_input_and_info',
-            lambda args: ("url", 1080, "Title", "Up", 100.0, "Russian")
+            lambda args: ("url", 1080, "Title", "Up", 100.0, "Russian", False)
         )
         
         # User says YES (skip translation)
@@ -114,7 +114,7 @@ class TestRunPipeline:
         # Language = Russian
         monkeypatch.setattr(
             main.cli, 'get_user_input_and_info',
-            lambda args: ("url", 1080, "Title", "Up", 100.0, "Russian")
+            lambda args: ("url", 1080, "Title", "Up", 100.0, "Russian", False)
         )
         
         # User says NO (don't skip)
@@ -142,7 +142,7 @@ class TestRunPipeline:
         # Return 'audio' as quality
         monkeypatch.setattr(
             main.cli, 'get_user_input_and_info',
-            lambda args: ("url", 'audio', "Title", "Up", 100.0, "en")
+            lambda args: ("url", 'audio', "Title", "Up", 100.0, "en", False)
         )
         
         mock_get_translation = MagicMock(return_value=True)
@@ -174,7 +174,7 @@ class TestRunPipeline:
         
         monkeypatch.setattr(
             main.cli, 'get_user_input_and_info',
-            lambda args: ("url", 1080, "Title", "Up", 100.0, "en")
+            lambda args: ("url", 1080, "Title", "Up", 100.0, "en", False)
         )
         
         # Translation fails
@@ -213,7 +213,7 @@ class TestRunPipeline:
         
         monkeypatch.setattr(
             main.cli, 'get_user_input_and_info',
-            lambda args: ("url", 1080, "Title", "Up", 100.0, "en")
+            lambda args: ("url", 1080, "Title", "Up", 100.0, "en", False)
         )
         
         # Translation fails
@@ -250,7 +250,7 @@ class TestRunPipeline:
         
         monkeypatch.setattr(
             main.cli, 'get_user_input_and_info',
-            lambda args: ("url", 1080, "Title", "Up", 100.0, "en")
+            lambda args: ("url", 1080, "Title", "Up", 100.0, "en", False)
         )
         
         monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: True)
