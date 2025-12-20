@@ -1,10 +1,3 @@
-from importlib.metadata import version, PackageNotFoundError
+__version__ = "0.3.3"
 
-try:
-    # Checks installed 'ytrd' package version
-    __version__ = version("ytrd")
-except PackageNotFoundError:
-    # If package not installed (e.g. running script locally),
-    # set placeholder
-    __version__ = "unknown"
 

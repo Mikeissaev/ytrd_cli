@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ytrd"
-version = "0.3.3"
+dynamic = ["version"]
 description = "Утилита командной строки для скачивания видео с YouTube с автоматическим наложением закадрового перевода."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -27,3 +27,6 @@ ytrd = "ytrd.main:entry_point"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "ytrd.__version__"}
