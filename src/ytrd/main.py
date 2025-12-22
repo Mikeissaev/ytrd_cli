@@ -45,12 +45,6 @@ def run_pipeline():
     download_subs = False
     if args.subtitles:
         download_subs = True
-    elif not is_audio_only: 
-        # Ask if not audio-only. 
-        # Previously we checked 'not skip_translation', but user might want subs even with original video.
-        print() # Visual spacing
-        if cli.ask_yes_no("Скачать русские субтитры?"):
-             download_subs = True
 
     if not skip_translation:
         # First try to get translation.
