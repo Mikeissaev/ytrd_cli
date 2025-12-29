@@ -6,10 +6,15 @@ from . import cli
 from . import vot
 from . import downloader
 from . import ffmpeg
+from . import history
 
 def run_pipeline():
     """Main execution pipeline (Conductor)."""
     args = cli.parse_arguments()
+
+    if args.clear_history:
+        history.clear_history()
+        return
 
     # --- Initial setup ---
     utils.install_check()
@@ -21,6 +26,14 @@ def run_pipeline():
     # to know video duration for translation request.
     url, selected_quality, title, uploader, duration, language, use_live_voice, mix_mode, dual_mode = cli.get_user_input_and_info(args)
     
+    # Check history
+    if history.is_in_history(url):
+        print(f"\n{config.COLOR_YELLOW}⚠️  Это видео уже было скачано ранее.{config.COLOR_RESET}")
+        if not cli.ask_yes_no("Продолжить скачивание?"):
+            print(f"{config.COLOR_YELLOW}Отмена.{config.COLOR_RESET}")
+            utils.cleanup()
+            return
+
     # Update args with interactive choices
     args.mix = mix_mode
     args.dual = dual_mode
@@ -60,6 +73,7 @@ def run_pipeline():
             url, args, skip_translation, translation_success, uploader, title, 
             file_exists_callback=cli.handle_existing_file
         )
+        history.add_to_history(url)
         return
 
     if not translation_success and not skip_translation:
@@ -136,6 +150,9 @@ def run_pipeline():
         current_path, ext, translation_success, uploader, title, actual_height, args, duration, 
         sub_path=sub_path, sub_lang=sub_lang if sub_path else None
     )
+    
+    # Add to history if successful
+    history.add_to_history(url)
 
 def entry_point():
     """CLI entry point."""

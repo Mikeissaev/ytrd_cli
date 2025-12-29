@@ -210,6 +210,7 @@ def parse_arguments():
   ytrd https://youtu.be/VIDEO_ID -d       # Режим двух дорожек (Dual)
   ytrd https://youtu.be/VIDEO_ID -q 1080  # Скачать 1080p
   ytrd https://youtu.be/VIDEO_ID -s       # Скачать с субтитрами
+  ytrd --clear-history                    # Очистить историю скачиваний
     """
     
     parser = RussianArgumentParser(
@@ -235,6 +236,7 @@ def parse_arguments():
     parser.add_argument("-a", "--audio", action="store_true", help="Режим 'Только аудио'.\nСкачивает только переведенную аудиодорожку (mp3).")
     parser.add_argument("-s", "--subtitles", action="store_true", help="Скачать и вшить русские субтитры (если доступны).")
     parser.add_argument("-l", "--live", action="store_true", help="Использовать 'Живой голос'.\nБолее качественная и естественная озвучка.")
+    parser.add_argument("--clear-history", action="store_true", help="Очистить файл истории скачиваний и выйти.")
     
     args = parser.parse_args()
     return validate_args_compatibility(args)

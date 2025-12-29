@@ -12,6 +12,7 @@ TEMP_AUDIO_FILENAME = "temp_audio.mp3"
 # --- Cookies ---
 # Save cookies in user's home directory for persistence
 COOKIES_FILE_PATH = os.path.join(Path.home(), '.ytrd_cookies.txt')
+HISTORY_FILE_PATH = os.path.join(Path.home(), '.ytrd_history.json')
 
 # --- Colors ---
 COLOR_CYAN = "\033[96m"

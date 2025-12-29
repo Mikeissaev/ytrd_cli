@@ -29,5 +29,8 @@ temp_*
 .vscode/
 .idea/
 
+# Gemini Context
+GEMINI.md
+
 # Debug scripts
 debug_*.py

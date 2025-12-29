@@ -18,8 +18,14 @@ class TestRunPipeline:
         mock_args.dual = False
         mock_args.audio = False
         mock_args.quality = 1080
+        mock_args.clear_history = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        
+        # Mock history
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
+        mock_add_history = MagicMock()
+        monkeypatch.setattr(main.history, 'add_to_history', mock_add_history)
         
         # Mock startup checks
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
@@ -53,6 +59,7 @@ class TestRunPipeline:
         mock_get_translation.assert_called_once()
         mock_download_video.assert_called_once()
         mock_process_merge.assert_called_once()
+        mock_add_history.assert_called_once_with("http://url")
         
         # Check merge was called with translation_success=True
         merge_args = mock_process_merge.call_args[0]
@@ -62,8 +69,13 @@ class TestRunPipeline:
         """Test skipping translation for Russian video when user confirms."""
         mock_args = MagicMock()
         mock_args.audio = False
+        mock_args.clear_history = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
+        mock_add_history = MagicMock()
+        monkeypatch.setattr(main.history, 'add_to_history', mock_add_history)
+
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
         monkeypatch.setattr(main.utils, 'check_write_permissions', MagicMock())
         monkeypatch.setattr(main.utils, 'cleanup', MagicMock())
@@ -95,6 +107,7 @@ class TestRunPipeline:
         
         # Should still download video
         mock_download_video.assert_called_once()
+        mock_add_history.assert_called_once()
         
         # Merge should be called with translation_success=False
         assert mock_process_merge.call_args[0][2] is False
@@ -103,8 +116,11 @@ class TestRunPipeline:
         """Test cancellation when user declines to download Russian video."""
         mock_args = MagicMock()
         mock_args.audio = False
+        mock_args.clear_history = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
+
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
         monkeypatch.setattr(main.utils, 'check_write_permissions', MagicMock())
         
@@ -133,8 +149,13 @@ class TestRunPipeline:
         """Test audio-only workflow."""
         mock_args = MagicMock()
         mock_args.audio = False  # Will be set by get_user_input_and_info
+        mock_args.clear_history = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
+        mock_add_history = MagicMock()
+        monkeypatch.setattr(main.history, 'add_to_history', mock_add_history)
+
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
         monkeypatch.setattr(main.utils, 'check_write_permissions', MagicMock())
         monkeypatch.setattr(main.utils, 'cleanup', MagicMock())
@@ -158,6 +179,7 @@ class TestRunPipeline:
         
         # Should process audio only
         mock_process_audio.assert_called_once()
+        mock_add_history.assert_called_once()
         
         # Should NOT download video
         mock_download_video.assert_not_called()
@@ -166,8 +188,13 @@ class TestRunPipeline:
         """Test workflow when translation is not available."""
         mock_args = MagicMock()
         mock_args.audio = False
+        mock_args.clear_history = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
+        mock_add_history = MagicMock()
+        monkeypatch.setattr(main.history, 'add_to_history', mock_add_history)
+
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
         monkeypatch.setattr(main.utils, 'check_write_permissions', MagicMock())
         monkeypatch.setattr(main.utils, 'cleanup', MagicMock())
@@ -195,6 +222,7 @@ class TestRunPipeline:
         
         # Should download video anyway
         mock_download_video.assert_called_once()
+        mock_add_history.assert_called_once()
         
         # Merge with translation_success=False
         assert mock_process_merge.call_args[0][2] is False
@@ -203,8 +231,11 @@ class TestRunPipeline:
         """Test cancellation when translation not found and user declines original."""
         mock_args = MagicMock()
         mock_args.audio = False
+        mock_args.clear_history = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
+
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
         monkeypatch.setattr(main.utils, 'check_write_permissions', MagicMock())
         
@@ -242,8 +273,12 @@ class TestRunPipeline:
         mock_args.mix = mix
         mock_args.dual = dual
         mock_args.audio = False
+        mock_args.clear_history = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
+        monkeypatch.setattr(main.history, 'add_to_history', MagicMock())
+
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
         monkeypatch.setattr(main.utils, 'check_write_permissions', MagicMock())
         monkeypatch.setattr(main.utils, 'cleanup', MagicMock())
@@ -275,6 +310,97 @@ class TestRunPipeline:
         args_passed = call_kwargs[0][6]  # args object
         assert hasattr(args_passed, 'mix')
         assert hasattr(args_passed, 'dual')
+
+    def test_run_pipeline_clear_history(self, monkeypatch):
+        """Test that pipeline clears history when flag is set."""
+        mock_args = MagicMock()
+        mock_args.clear_history = True
+        
+        monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        
+        mock_clear = MagicMock()
+        monkeypatch.setattr(main.history, 'clear_history', mock_clear)
+        
+        # Should return early, so no other mocks needed essentially, 
+        # but good to mock cleanup/install checks just in case logic changes
+        
+        main.run_pipeline()
+        
+        mock_clear.assert_called_once()
+
+    def test_run_pipeline_history_duplicate_cancel(self, monkeypatch):
+        """Test user cancelling download when URL is in history."""
+        mock_args = MagicMock()
+        mock_args.clear_history = False
+        
+        monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.utils, 'install_check', MagicMock())
+        monkeypatch.setattr(main.utils, 'check_write_permissions', MagicMock())
+        mock_cleanup = MagicMock()
+        monkeypatch.setattr(main.utils, 'cleanup', mock_cleanup)
+        
+        # User input
+        monkeypatch.setattr(
+            main.cli, 'get_user_input_and_info',
+            lambda args: ("http://url", 1080, "Title", "Up", 100.0, "en", False, False, False)
+        )
+        
+        # History check returns True (exists)
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=True))
+        
+        # User says NO (cancel)
+        monkeypatch.setattr(main.cli, 'ask_yes_no', lambda text: False)
+        
+        mock_download_video = MagicMock()
+        monkeypatch.setattr(main.downloader, 'download_video', mock_download_video)
+        
+        main.run_pipeline()
+        
+        # Should cleanup and NOT download
+        mock_cleanup.assert_called()
+        mock_download_video.assert_not_called()
+
+    def test_run_pipeline_history_duplicate_continue(self, monkeypatch):
+        """Test user continuing download even if URL is in history."""
+        mock_args = MagicMock()
+        mock_args.clear_history = False
+        
+        monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.utils, 'install_check', MagicMock())
+        monkeypatch.setattr(main.utils, 'check_write_permissions', MagicMock())
+        monkeypatch.setattr(main.utils, 'cleanup', MagicMock())
+        
+        monkeypatch.setattr(
+            main.cli, 'get_user_input_and_info',
+            lambda args: ("http://url", 1080, "Title", "Up", 100.0, "en", False, False, False)
+        )
+        
+        # History check returns True
+        monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=True))
+        
+        # User says YES (continue)
+        monkeypatch.setattr(main.cli, 'ask_yes_no', lambda text: True)
+        
+        # Mock rest of pipeline
+        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: True)
+        mock_download_video = MagicMock(return_value=(100, 1080, "video.mp4"))
+        monkeypatch.setattr(main.downloader, 'download_video', mock_download_video)
+        
+        # Mock subtitles to return None (no subtitles) or successfully found
+        monkeypatch.setattr(main.downloader, 'download_subtitles', lambda *args, **kwargs: (None, None))
+        # Also need to mock ask_subtitle_error_action if subs not found
+        monkeypatch.setattr(main.cli, 'ask_subtitle_error_action', lambda: 'skip')
+
+        monkeypatch.setattr(main.ffmpeg, 'process_video_merge', MagicMock())
+        mock_add_history = MagicMock()
+        monkeypatch.setattr(main.history, 'add_to_history', mock_add_history)
+        
+        main.run_pipeline()
+        
+        # Should proceed to download
+        mock_download_video.assert_called_once()
+        # Should add to history again (refresh it)
+        mock_add_history.assert_called_once_with("http://url")
 
 
 class TestEntryPoint:
