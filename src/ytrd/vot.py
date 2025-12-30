@@ -61,7 +61,8 @@ def get_translation_audio(
 # --- Protobuf Helpers ---
 # Minimal implementation to avoid needing 'protoc' installed
 
-def encode_varint(value):
+def encode_varint(value: int) -> bytes:
+    """Кодирует целое число в varint формат."""
     target = []
     if value < 0:
         value += (1 << 64)
@@ -74,7 +75,12 @@ def encode_varint(value):
     target.append(bits)
     return bytes(target)
 
-def read_varint(buffer, pos):
+def read_varint(buffer: bytes, pos: int) -> tuple[int, int]:
+    """Декодирует varint из буфера.
+
+    Returns:
+        Кортеж (value, new_position)
+    """
     result = 0
     shift = 0
     while True:
@@ -85,82 +91,84 @@ def read_varint(buffer, pos):
             return result, pos
         shift += 7
 
-def encode_tag(field_number, wire_type):
+def encode_tag(field_number: int, wire_type: int) -> bytes:
     return encode_varint((field_number << 3) | wire_type)
 
-def encode_string(field_number, value):
+def encode_string(field_number: int, value: Optional[str]) -> bytes:
     if value is None:
         return b""
     encoded = value.encode('utf-8')
     return encode_tag(field_number, 2) + encode_varint(len(encoded)) + encoded
 
-def encode_bool(field_number, value):
+def encode_bool(field_number: int, value: bool) -> bytes:
     return encode_tag(field_number, 0) + encode_varint(1 if value else 0)
 
-def encode_double(field_number, value):
+def encode_double(field_number: int, value: float) -> bytes:
     return encode_tag(field_number, 1) + struct.pack('<d', float(value))
 
-def encode_int32(field_number, value):
+def encode_int32(field_number: int, value: int) -> bytes:
     return encode_tag(field_number, 0) + encode_varint(value)
 
 class SimpleProtobufReader:
-    def __init__(self, data):
-        self.data = data
-        self.pos = 0
-        self.fields = {}
+    """Простой парсер protobuf сообщений."""
+
+    def __init__(self, data: bytes) -> None:
+        self.data: bytes = data
+        self.pos: int = 0
+        self.fields: dict[int, bytes | int] = {}
         self._parse()
 
-    def _parse(self):
+    def _parse(self) -> None:
         while self.pos < len(self.data):
             try:
                 tag, self.pos = read_varint(self.data, self.pos)
                 field_number = tag >> 3
                 wire_type = tag & 0x07
-                
-                if wire_type == 0: # Varint
+
+                if wire_type == 0:  # Varint
                     val, self.pos = read_varint(self.data, self.pos)
                     self.fields[field_number] = val
-                elif wire_type == 2: # Length-delimited (string, bytes, embedded messages)
+                elif wire_type == 2:  # Length-delimited (string, bytes, embedded messages)
                     length, self.pos = read_varint(self.data, self.pos)
                     val = self.data[self.pos:self.pos+length]
                     self.pos += length
                     self.fields[field_number] = val
-                elif wire_type == 1: # 64-bit
+                elif wire_type == 1:  # 64-bit
                     val = self.data[self.pos:self.pos+8]
                     self.pos += 8
                     self.fields[field_number] = val
-                elif wire_type == 5: # 32-bit
+                elif wire_type == 5:  # 32-bit
                     val = self.data[self.pos:self.pos+4]
                     self.pos += 4
                     self.fields[field_number] = val
                 else:
                     # Skip unknown
-                    pass 
+                    pass
             except IndexError:
                 break
 
-    def get_string(self, field_number):
+    def get_string(self, field_number: int) -> Optional[str]:
         if field_number in self.fields:
             return self.fields[field_number].decode('utf-8')
         return None
 
-    def get_int(self, field_number):
+    def get_int(self, field_number: int) -> Optional[int]:
         return self.fields.get(field_number)
+
 
 # --- Core Logic ---
 
-def get_uuid():
+def get_uuid() -> str:
+    """Генерирует UUID для запроса."""
     return str(uuid.uuid4()).replace("-", "")
 
-def get_signature(body):
-    """
-    Calculates HMAC SHA256 signature for the request body.
-    """
+def get_signature(body: bytes) -> str:
+    """Вычисляет HMAC SHA256 подпись для тела запроса."""
     signature = hmac.new(config.VOT_HMAC_KEY, body, hashlib.sha256).hexdigest()
     return signature
 
 
-def translate_video(url, duration=341.0, use_live_voice=False):
+def translate_video(url: str, duration: float = 341.0, use_live_voice: bool = False) -> dict:
     video_id = utils.extract_video_id(url)
     if not video_id:
         return {"success": False, "message": "Invalid YouTube URL"}
