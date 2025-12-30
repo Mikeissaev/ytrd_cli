@@ -185,29 +185,31 @@ class TestCheckWritePermissions:
     
     def test_check_write_permissions_exits_on_creation_error(self, monkeypatch):
         """Test that function exits if directory creation fails."""
+        from ytrd import errors
+
         def mock_makedirs(path, *args, **kwargs):
             raise OSError("Permission denied")
-        
+
         monkeypatch.setattr(os, 'makedirs', mock_makedirs)
         monkeypatch.setattr(os.path, 'exists', lambda x: False)
-        
-        with pytest.raises(SystemExit) as exc_info:
+
+        # Теперь выбрасывается YtrdFileError
+        with pytest.raises(errors.YtrdFileError):
             utils.check_write_permissions("/invalid/path")
-        
-        assert exc_info.value.code == 1
-    
+
     def test_check_write_permissions_exits_on_no_write_access(self, monkeypatch, tmp_path):
         """Test that function exits if directory is not writable."""
+        from ytrd import errors
+
         test_dir = tmp_path / "readonly"
         test_dir.mkdir()
-        
+
         # Mock to simulate no write permission
         monkeypatch.setattr(os, 'access', lambda path, mode: False)
-        
-        with pytest.raises(SystemExit) as exc_info:
+
+        # Теперь выбрасывается YtrdFileError
+        with pytest.raises(errors.YtrdFileError):
             utils.check_write_permissions(str(test_dir))
-        
-        assert exc_info.value.code == 1
 
 
 class TestValidateUrl:
@@ -221,5 +223,8 @@ class TestValidateUrl:
     
     def test_validate_url_rejects_non_youtube(self, monkeypatch):
         """Test that non-YouTube URLs are rejected."""
-        with pytest.raises(SystemExit):
+        from ytrd import errors
+
+        # Теперь выбрасывается YtrdValidationError
+        with pytest.raises(errors.YtrdValidationError):
             utils.validate_url("https://vimeo.com/123456")

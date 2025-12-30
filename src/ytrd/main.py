@@ -7,6 +7,7 @@ from . import vot
 from . import downloader
 from . import ffmpeg
 from . import history
+from . import errors
 
 def run_pipeline():
     """Main execution pipeline (Conductor)."""
@@ -141,8 +142,7 @@ def run_pipeline():
                 sub_path = None
             elif action == 'cancel':
                 print(f"{config.COLOR_YELLOW}Операция отменена пользователем.{config.COLOR_RESET}")
-                utils.cleanup()
-                sys.exit(0)
+                raise errors.YtrdUserCancelled("Отмена пользователем")
 
 
     # Delegate merging to ffmpeg module
@@ -159,7 +159,7 @@ def entry_point():
     # Fix encoding for Windows console
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding='utf-8')
-    
+
     # Add Termux paths
     os.environ["PATH"] = f"{config.TERMUX_BIN_PATH}:{os.environ.get('PATH', '')}"
 
@@ -168,8 +168,18 @@ def entry_point():
     except KeyboardInterrupt:
         utils.cleanup()
         sys.exit(0)
+    except errors.YtrdUserCancelled as e:
+        # Пользователь отменил операцию - тихий выход
+        utils.cleanup()
+        sys.exit(0)
+    except errors.YtrdError as e:
+        # Ошибки приложения - показать сообщение и выйти с кодом 1
+        print(f"{config.COLOR_RED}❌ Ошибка: {e}{config.COLOR_RESET}")
+        utils.cleanup(True)
+        sys.exit(1)
     except Exception as e:
-        print(f"{config.COLOR_RED}Error: {e}{config.COLOR_RESET}")
+        # Неожиданные ошибки
+        print(f"{config.COLOR_RED}❌ Неожиданная ошибка: {e}{config.COLOR_RESET}")
         utils.cleanup(True)
         sys.exit(1)
 

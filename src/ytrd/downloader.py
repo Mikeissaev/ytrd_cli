@@ -6,6 +6,7 @@ import shutil
 from tqdm import tqdm
 from . import config
 from . import utils
+from . import errors
 
 class Logger:
     def debug(self, msg): pass
@@ -156,10 +157,9 @@ def download_video(url, path, quality_height=None, retry_callback=None):
             # Need to delete partially downloaded/corrupted files before retry.
             is_critical = "416" in error_msg or "codec parameters" in error_msg
             
-            # Use callback if provided, otherwise fail
+            # Use callback if provided, otherwise raise exception
             if not retry_callback:
-                print(f"{config.COLOR_RED}Сетевая ошибка: {error_msg}{config.COLOR_RESET}")
-                sys.exit(1)
+                raise errors.YtrdDownloadError(f"Сетевая ошибка: {error_msg}")
 
             if is_critical or not retry_callback(f"Сетевая ошибка при скачивании видео: {error_msg}"):
                 if is_critical:
@@ -168,10 +168,8 @@ def download_video(url, path, quality_height=None, retry_callback=None):
                         print(f"{config.COLOR_YELLOW}Очистка временных файлов видео...{config.COLOR_RESET}")
                         utils.clean_video_partials()
                         continue
-                
-                print(f"{config.COLOR_RED}Завершение работы по требованию пользователя.{config.COLOR_RESET}")
-                utils.cleanup(True)
-                sys.exit(1)
+
+                raise errors.YtrdUserCancelled("Завершение работы по требованию пользователя")
 
 def download_audio(url, path, retry_callback=None):
     """Downloads translation audio track with retry logic."""
@@ -199,9 +197,7 @@ def download_audio(url, path, retry_callback=None):
 
             error_msg = str(e)
             if not retry_callback or not retry_callback(f"Сетевая ошибка при скачивании аудио: {error_msg}"):
-                print(f"{config.COLOR_RED}Завершение работы по требованию пользователя.{config.COLOR_RESET}")
-                utils.cleanup(True)
-                sys.exit(1)
+                raise errors.YtrdUserCancelled("Завершение работы по требованию пользователя")
 
 def download_youtube_audio(url, path):
     """Downloads audio from YouTube in MP3 format."""

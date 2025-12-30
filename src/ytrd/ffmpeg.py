@@ -7,6 +7,7 @@ from tqdm import tqdm
 from . import config
 from . import utils
 from . import cli
+from . import errors
 
 def build_ffmpeg_command(mode, final_path, is_mkv=False, sub_path=None, sub_lang='rus'):
     """
@@ -220,17 +221,13 @@ def run_ffmpeg(cmd_list, duration, mode_name="FFmpeg"):
         pbar.close()
         
         if rc != 0:
-            print(f"\n{config.COLOR_RED}❌ Ошибка FFmpeg (код {rc}):{config.COLOR_RESET}")
-            print(f"{config.COLOR_YELLOW}Команда:{config.COLOR_RESET} {shlex.join(cmd_list)}")
-            print(f"{config.COLOR_RED}Лог выполнения:{config.COLOR_RESET}")
-            print("".join(full_log[-20:])) # Print last 20 lines of log
-            utils.cleanup(error=True)
-            sys.exit(1)
-            
+            error_msg = f"Ошибка FFmpeg (код {rc})\nКоманда: {shlex.join(cmd_list)}\nЛог: {''.join(full_log[-20:])}"
+            raise errors.YtrdExternalToolError(error_msg)
+
     except (OSError, FileNotFoundError) as e:
-        print(f"\n{config.COLOR_RED}❌ Ошибка запуска FFmpeg: {e}{config.COLOR_RESET}")
-        print(f"{config.COLOR_YELLOW}Убедитесь, что ffmpeg установлен и доступен в PATH.{config.COLOR_RESET}")
-        sys.exit(1)
+        raise errors.YtrdExternalToolError(
+            f"Ошибка запуска FFmpeg: {e}\nУбедитесь, что ffmpeg установлен и доступен в PATH"
+        )
 
 def convert_to_srt(sub_path):
     """

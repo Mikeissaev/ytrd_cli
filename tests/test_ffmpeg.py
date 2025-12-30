@@ -366,32 +366,31 @@ class TestRunFFmpeg:
     
     def test_run_ffmpeg_error_exits(self, monkeypatch):
         """Test that FFmpeg errors cause system exit."""
+        from ytrd import errors
         import subprocess
-        
+
         class MockStdout:
             def __init__(self):
                 self.lines = ["Error message\n"]
                 self.index = 0
-            
+
             def readline(self):
                 if self.index < len(self.lines):
                     line = self.lines[self.index]
                     self.index += 1
                     return line
                 return ""
-        
+
         mock_proc = MagicMock()
         mock_proc.stdout = MockStdout()
         mock_proc.poll.return_value = 1  # Error code
-        
+
         monkeypatch.setattr(subprocess, 'Popen', lambda *args, **kwargs: mock_proc)
-        
+
         from ytrd import utils
         mock_cleanup = MagicMock()
         monkeypatch.setattr(utils, 'cleanup', mock_cleanup)
-        
-        with pytest.raises(SystemExit) as exc_info:
+
+        # Теперь выбрасывается YtrdExternalToolError
+        with pytest.raises(errors.YtrdExternalToolError):
             ffmpeg.run_ffmpeg(['ffmpeg'], duration=100)
-        
-        assert exc_info.value.code == 1
-        mock_cleanup.assert_called_with(error=True)

@@ -4,6 +4,7 @@ import os
 from . import config
 from . import utils
 from . import downloader
+from . import errors
 from ytrd import __version__
 
 def ask_to_retry(error_message):
@@ -50,12 +51,12 @@ def handle_existing_file(path):
     """Checks file existence and asks user what to do."""
     if not os.path.exists(path):
         return path
-        
+
     print(f"\n{config.COLOR_YELLOW}Файл уже существует: {path}{config.COLOR_RESET}")
     print("  [1] Заменить")
     print("  [2] Переименовать")
     print("  [3] Отмена")
-    
+
     while True:
         try:
             choice = input("Выбор: ").strip()
@@ -72,12 +73,9 @@ def handle_existing_file(path):
                     new_path = f"{base} ({counter}){ext}"
                 return new_path
             elif choice == '3':
-                print(f"{config.COLOR_YELLOW}Отмена операции.{config.COLOR_RESET}")
-                utils.cleanup()
-                sys.exit(0)
+                raise errors.YtrdUserCancelled("Отмена операции")
         except (KeyboardInterrupt, EOFError):
-            utils.cleanup()
-            sys.exit(0)
+            raise errors.YtrdUserCancelled("Отмена пользователем")
 
 def ask_subtitle_error_action():
     """Asks user what to do if subtitle download fails."""
@@ -197,10 +195,8 @@ class RussianArgumentParser(argparse.ArgumentParser):
              message = message.replace("the following arguments are required", "Необходимы следующие аргументы")
         elif "invalid" in message:
              message = message.replace("invalid", "некорректное").replace("value", "значение").replace("int", "число")
-             
-        print(f"{config.COLOR_RED}❌ Ошибка аргументов: {message}{config.COLOR_RESET}")
-        self.print_help()
-        sys.exit(2)
+
+        raise errors.YtrdValidationError(f"Ошибка аргументов: {message}")
 
 def parse_arguments():
     epilog_text = """

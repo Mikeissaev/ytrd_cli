@@ -84,18 +84,20 @@ class TestDownloadVideo:
     
     def test_download_video_network_error_retry(self, mock_youtube_dl_error, monkeypatch):
         """Test retry logic on download error."""
+        from ytrd import errors
+
         # Mock callback to reject retry
         mock_callback = MagicMock(return_value=False)
-        
-        with pytest.raises(SystemExit) as exc_info:
+
+        # Когда есть retry_callback и он возвращает False, выбрасывается YtrdUserCancelled
+        with pytest.raises(errors.YtrdUserCancelled):
             downloader.download_video(
                 "url",
                 "path.mp4",
                 quality_height=1080,
                 retry_callback=mock_callback
             )
-        
-        assert exc_info.value.code == 1
+
         mock_callback.assert_called_once()
     
     def test_download_video_critical_error_416(self, monkeypatch):
@@ -190,16 +192,19 @@ class TestDownloadAudio:
     
     def test_download_audio_network_error_retry(self, monkeypatch):
         """Test retry on network error."""
+        from ytrd import errors
+
         mock_callback = MagicMock(return_value=False)
-        
+
         def mock_get(*args, **kwargs):
             raise requests.exceptions.ConnectionError("Network error")
-        
+
         monkeypatch.setattr(requests, 'get', mock_get)
-        
-        with pytest.raises(SystemExit):
+
+        # Теперь выбрасывается YtrdUserCancelled
+        with pytest.raises(errors.YtrdUserCancelled):
             downloader.download_audio("url", "path.mp3", retry_callback=mock_callback)
-        
+
         mock_callback.assert_called_once()
 
 

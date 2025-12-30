@@ -11,6 +11,7 @@ import yt_dlp
 from pathlib import Path
 import logging
 from . import config
+from . import errors
 
 def get_default_output_dir():
     """Returns the path to the download folder depending on the OS."""
@@ -34,12 +35,10 @@ def check_write_permissions(path):
         try:
             os.makedirs(path)
         except OSError as e:
-            print(f"{config.COLOR_RED}❌ Не удалось создать папку {path}: {e}{config.COLOR_RESET}")
-            sys.exit(1)
-    
+            raise errors.YtrdFileError(f"Не удалось создать папку {path}: {e}")
+
     if not os.access(path, os.W_OK):
-        print(f"{config.COLOR_RED}❌ Нет прав на запись в {path}.{config.COLOR_RESET}")
-        sys.exit(1)
+        raise errors.YtrdFileError(f"Нет прав на запись в {path}")
 
 
 def get_binary_path(tool_name):
@@ -66,7 +65,11 @@ def cleanup(error=False):
 
 
 def retry_on_network_error(func):
-    """Decorator for retrying function execution on network errors."""
+    """Decorator for retrying function execution on network errors.
+
+    NOTE: Этот декоратор всё ещё имеет циклическую зависимость от cli.
+    Будет заменён на callback-based версию в задаче 1.2.
+    """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         while True:
@@ -75,11 +78,10 @@ def retry_on_network_error(func):
             except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError) as e:
                 error_msg = getattr(e, 'msg', str(e))
                 # Import cli here to avoid circular dependency
+                # TODO: Будет переделано на callback в задаче 1.2
                 from . import cli
                 if not cli.ask_to_retry(f"Сетевая ошибка в '{func.__name__}': {error_msg}"):
-                    print(f"{config.COLOR_RED}Завершение работы по требованию пользователя.{config.COLOR_RESET}")
-                    cleanup(True)
-                    sys.exit(1)
+                    raise errors.YtrdUserCancelled("Завершение работы по требованию пользователя")
     return wrapper
 
 
@@ -92,15 +94,13 @@ def check_internet():
 
 def validate_url(url):
     if not re.search(r'(youtube\.com|youtu\.?be)', url):
-        print(f"{config.COLOR_RED}❌ Ссылка не похожа на YouTube.{config.COLOR_RESET}")
-        sys.exit(1)
+        raise errors.YtrdValidationError("Ссылка не похожа на YouTube")
 
 def install_check():
     required = ['ffmpeg']
     for tool in required:
         if get_binary_path(tool) is None:
-            print(f"{config.COLOR_RED}❌ Не найден: {tool}{config.COLOR_RESET}")
-            sys.exit(1)
+            raise errors.YtrdExternalToolError(f"Не найден: {tool}")
 
 def clean_video_partials():
     """Deletes all temporary video files (but keeps translation audio)."""

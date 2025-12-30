@@ -222,17 +222,14 @@ class TestHandleExistingFile:
     
     def test_handle_existing_file_cancel(self, monkeypatch, mock_file_operations):
         """Test choosing to cancel (option 3)."""
-        from ytrd import utils
-        
+        from ytrd import errors
+
         monkeypatch.setattr(os.path, 'exists', lambda x: True)
         monkeypatch.setattr('builtins.input', lambda _: '3')
-        
-        mock_cleanup = None
-        
-        with pytest.raises(SystemExit) as exc_info:
+
+        # Теперь выбрасывается YtrdUserCancelled вместо SystemExit
+        with pytest.raises(errors.YtrdUserCancelled):
             cli.handle_existing_file("/path/to/file.mp4")
-        
-        assert exc_info.value.code == 0
 
 
 class TestGetUserInputAndInfo:
