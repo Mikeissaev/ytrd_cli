@@ -38,9 +38,13 @@ class TestRunPipeline:
             lambda args: ("http://url", 1080, "Title", "Uploader", 100.0, "en", False, False, False)
         )
         
-        # Mock VOT (translation)
-        mock_get_translation = MagicMock(return_value=True)
+        # Mock VOT (translation) - теперь возвращает кортеж (success, url)
+        mock_get_translation = MagicMock(return_value=(True, "http://audio.mp3"))
         monkeypatch.setattr(main.vot, 'get_translation_audio', mock_get_translation)
+
+        # Mock downloader (audio для перевода)
+        mock_download_audio = MagicMock()
+        monkeypatch.setattr(main.downloader, 'download_audio', mock_download_audio)
         
         # Mock downloader (video)
         mock_download_video = MagicMock(return_value=(100, 1080, "temp_video.mp4"))
@@ -166,8 +170,11 @@ class TestRunPipeline:
             lambda args: ("url", 'audio', "Title", "Up", 100.0, "en", False, False, False)
         )
         
-        mock_get_translation = MagicMock(return_value=True)
+        mock_get_translation = MagicMock(return_value=(True, "http://audio.mp3"))
         monkeypatch.setattr(main.vot, 'get_translation_audio', mock_get_translation)
+
+        mock_download_audio = MagicMock()
+        monkeypatch.setattr(main.downloader, 'download_audio', mock_download_audio)
         
         mock_process_audio = MagicMock()
         monkeypatch.setattr(main.downloader, 'process_audio_only', mock_process_audio)
@@ -204,8 +211,8 @@ class TestRunPipeline:
             lambda args: ("url", 1080, "Title", "Up", 100.0, "en", False, False, False)
         )
         
-        # Translation fails
-        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: False)
+        # Translation fails - теперь возвращает кортеж (False, None)
+        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: (False, None))
         
         # User agrees to download original
         monkeypatch.setattr(main.cli, 'ask_yes_no', lambda text: True)
@@ -247,8 +254,8 @@ class TestRunPipeline:
             lambda args: ("url", 1080, "Title", "Up", 100.0, "en", False, False, False)
         )
         
-        # Translation fails
-        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: False)
+        # Translation fails - теперь возвращает кортеж (False, None)
+        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: (False, None))
         
         # User declines to download original
         monkeypatch.setattr(main.cli, 'ask_yes_no', lambda text: False)
@@ -288,7 +295,9 @@ class TestRunPipeline:
             lambda args: ("url", 1080, "Title", "Up", 100.0, "en", False, mix, dual)
         )
         
-        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: True)
+        # vot.get_translation_audio теперь возвращает кортеж
+        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: (True, "http://audio.mp3"))
+        monkeypatch.setattr(main.downloader, 'download_audio', MagicMock())
         monkeypatch.setattr(main.downloader, 'download_video', lambda *args, **kwargs: (100, 1080, "temp_video.mp4"))
         
         mock_process_merge = MagicMock()
@@ -381,8 +390,9 @@ class TestRunPipeline:
         # User says YES (continue)
         monkeypatch.setattr(main.cli, 'ask_yes_no', lambda text: True)
         
-        # Mock rest of pipeline
-        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: True)
+        # Mock rest of pipeline - vot теперь возвращает кортеж
+        monkeypatch.setattr(main.vot, 'get_translation_audio', lambda *args, **kwargs: (True, "http://audio.mp3"))
+        monkeypatch.setattr(main.downloader, 'download_audio', MagicMock())
         mock_download_video = MagicMock(return_value=(100, 1080, "video.mp4"))
         monkeypatch.setattr(main.downloader, 'download_video', mock_download_video)
         

@@ -8,83 +8,73 @@ from unittest.mock import MagicMock
 
 class TestGetTranslationAudio:
     """Test suite for translation audio retrieval with polling."""
-    
+
     def test_get_translation_audio_ready_immediately(self, monkeypatch, mock_vot_ready_response):
         """Test successful translation that is ready immediately."""
         mock_response = MagicMock()
         mock_response.content = mock_vot_ready_response
         mock_response.raise_for_status = MagicMock()
-        
+
         monkeypatch.setattr(requests, 'post', lambda *args, **kwargs: mock_response)
         monkeypatch.setattr(vot.utils, 'extract_video_id', lambda x: "test_id")
-        
-        # Mock downloader.download_audio
-        mock_download = MagicMock()
-        monkeypatch.setattr(vot.downloader, 'download_audio', mock_download)
-        
+
+        # Теперь vot.get_translation_audio возвращает кортеж (success, url)
         result = vot.get_translation_audio("url", 341.0)
-        
-        assert result is True
-        mock_download.assert_called_once()
-        call_args = mock_download.call_args[0]
-        assert call_args[0] == "http://test.mp3"
-        assert call_args[1] == config.TEMP_AUDIO_FILENAME
-    
+
+        assert result == (True, "http://test.mp3")
+
     def test_get_translation_audio_waiting_then_ready(self, monkeypatch, mock_vot_waiting_response, mock_vot_ready_response):
         """Test polling mechanism (Waiting → Ready)."""
         mock_responses = [
             MagicMock(content=mock_vot_waiting_response),
             MagicMock(content=mock_vot_ready_response),
         ]
-        
+
         for resp in mock_responses:
             resp.raise_for_status = MagicMock()
-        
+
         call_count = [0]
         def mock_post(*args, **kwargs):
             response = mock_responses[call_count[0]]
             call_count[0] += 1
             return response
-        
+
         monkeypatch.setattr(requests, 'post', mock_post)
         monkeypatch.setattr(vot.utils, 'extract_video_id', lambda x: "test_id")
         monkeypatch.setattr(time, 'sleep', MagicMock())  # Don't actually sleep
-        
-        mock_download = MagicMock()
-        monkeypatch.setattr(vot.downloader, 'download_audio', mock_download)
-        
+
         result = vot.get_translation_audio("url", 341.0)
-        
-        assert result is True
+
+        assert result == (True, "http://test.mp3")
         assert call_count[0] == 2  # Should have polled twice
-    
+
     def test_get_translation_audio_error_status(self, monkeypatch, mock_vot_error_response):
         """Test handling of error status from VOT API."""
         mock_response = MagicMock()
         mock_response.content = mock_vot_error_response
         mock_response.raise_for_status = MagicMock()
-        
+
         monkeypatch.setattr(requests, 'post', lambda *args, **kwargs: mock_response)
         monkeypatch.setattr(vot.utils, 'extract_video_id', lambda x: "test_id")
-        
+
         result = vot.get_translation_audio("url", 341.0)
-        
-        assert result is False
-    
+
+        assert result == (False, None)
+
     def test_get_translation_audio_timeout(self, monkeypatch, mock_vot_waiting_response):
         """Test timeout when translation takes too long."""
         mock_response = MagicMock()
         mock_response.content = mock_vot_waiting_response
         mock_response.raise_for_status = MagicMock()
-        
+
         monkeypatch.setattr(requests, 'post', lambda *args, **kwargs: mock_response)
         monkeypatch.setattr(vot.utils, 'extract_video_id', lambda x: "test_id")
         monkeypatch.setattr(time, 'sleep', MagicMock())
-        
+
         result = vot.get_translation_audio("url", 341.0)
-        
+
         # Should timeout after RETRY_ATTEMPTS
-        assert result is False
+        assert result == (False, None)
 
 
 class TestTranslateVideo:

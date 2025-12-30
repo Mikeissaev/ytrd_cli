@@ -47,7 +47,7 @@ def process_audio_only(url, args, skip_translation, translation_success, uploade
     utils.cleanup()
     return
 
-@utils.retry_on_network_error
+@utils.retry_on_network_error()
 def get_available_qualities(url):
     """Gets available video resolutions, title and author."""
     print(f"{config.COLOR_YELLOW}Анализ...{config.COLOR_RESET}")
@@ -61,9 +61,9 @@ def get_available_qualities(url):
             if h and h > 144:
                 # Filter storyboards and non-video formats
                 vcodec = f.get('vcodec')
-                if vcodec == 'none': continue 
+                if vcodec == 'none': continue
                 if 'storyboard' in (f.get('format_note') or ''): continue
-                
+
                 heights.add(h)
         return sorted(list(heights), reverse=True), info.get('title', 'Video'), info.get('uploader', 'Unknown'), info.get('duration', 0), info.get('language')
 

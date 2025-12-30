@@ -68,29 +68,30 @@ def cleanup(error=False):
 
 
 
-def retry_on_network_error(func):
-    """Decorator for retrying function execution on network errors.
+def retry_on_network_error(retry_callback=None):
+    """Декоратор с callback для повторной попытки.
 
-    NOTE: Этот декоратор всё ещё имеет циклическую зависимость от cli.
-    Будет заменён на callback-based версию в задаче 1.2.
+    Args:
+        retry_callback: Callable[[str], bool] - функция, принимающая сообщение
+                       и возвращающая True для повтора. Если None, выбрасывает исключение.
+
+    Returns:
+        Декоратор функции
     """
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        while True:
-            try:
-                return func(*args, **kwargs)
-            except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError) as e:
-                error_msg = getattr(e, 'msg', str(e))
-                # Import cli here to avoid circular dependency
-                # TODO: Будет переделано на callback в задаче 1.2
-                from . import cli
-                if not cli.ask_to_retry(f"Сетевая ошибка в '{func.__name__}': {error_msg}"):
-                    raise errors.YtrdUserCancelled("Завершение работы по требованию пользователя")
-    return wrapper
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError) as e:
+                    error_msg = getattr(e, 'msg', str(e))
+                    if retry_callback is None or not retry_callback(f"Сетевая ошибка в '{func.__name__}': {error_msg}"):
+                        raise errors.YtrdNetworkError(f"Сетевая ошибка: {error_msg}") from e
+        return wrapper
+    return decorator
 
 
-
-@retry_on_network_error
 def check_internet():
     """Checks internet connection availability."""
     # Decorator will handle OSError exception

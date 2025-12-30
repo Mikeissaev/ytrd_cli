@@ -6,44 +6,57 @@ import hashlib
 import time
 import json
 import re
+from typing import Optional, Tuple
 from . import config
 from . import utils
-from . import downloader
+from . import errors
 
-def get_translation_audio(url, duration, step_label="[1/3]", retry_callback=None, use_live_voice=False):
-    """Uses vot.py to get translation, waits for readiness and downloads."""
-    print(f"\n{config.COLOR_YELLOW}{step_label} Запрос перевода{' (Живой голос)' if use_live_voice else ''}...{config.COLOR_RESET}")
-    
+def get_translation_audio(
+    url: str,
+    duration: float,
+    use_live_voice: bool = False
+) -> Tuple[bool, Optional[str]]:
+    """Запрашивает перевод и ждёт готовности.
+
+    Args:
+        url: URL видео
+        duration: Длительность видео
+        use_live_voice: Использовать ли "Живой голос"
+
+    Returns:
+        Кортеж (success: bool, audio_url: str | None)
+    """
+    print(f"\n{config.COLOR_YELLOW}[1/3] Запрос перевода{' (Живой голос)' if use_live_voice else ''}...{config.COLOR_RESET}")
+
     # Polling (maximum defined in config)
-    max_attempts = config.RETRY_ATTEMPTS 
+    max_attempts = config.RETRY_ATTEMPTS
     for attempt in range(max_attempts):
         result = translate_video(url, duration, use_live_voice)
-        
+
         if not result.get("success"):
             print(f"{config.COLOR_RED}❌ Ошибка API перевода: {result.get('message')}{config.COLOR_RESET}")
-            return False
-            
+            return False, None
+
         status = result.get("status")
         if status == "Ready":
             audio_url = result.get("url")
             if audio_url:
                 print(f"{config.COLOR_GREEN}✅ Перевод готов!{config.COLOR_RESET}")
-                downloader.download_audio(audio_url, config.TEMP_AUDIO_FILENAME, retry_callback=retry_callback)
-                return True
+                return True, audio_url
             else:
                  print(f"{config.COLOR_RED}❌ Ошибка: Статус Ready, но нет URL.{config.COLOR_RESET}")
-                 return False
-                 
+                 return False, None
+
         elif status == "Waiting":
             print(f"{config.COLOR_YELLOW}⏳ Перевод в процессе... (Попытка {attempt+1}/{max_attempts}){config.COLOR_RESET}")
             time.sleep(config.RETRY_SLEEP_SECONDS)
-            
+
         else:
              print(f"{config.COLOR_RED}❌ Неизвестный статус или ошибка: {result.get('message')}{config.COLOR_RESET}")
-             return False
+             return False, None
 
     print(f"{config.COLOR_RED}❌ Время ожидания перевода истекло.{config.COLOR_RESET}")
-    return False
+    return False, None
 
 # --- Protobuf Helpers ---
 # Minimal implementation to avoid needing 'protoc' installed

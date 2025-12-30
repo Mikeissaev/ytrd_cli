@@ -60,13 +60,19 @@ def run_pipeline():
     if args.subtitles:
         download_subs = True
 
+    translation_success = False
     if not skip_translation:
-        # First try to get translation.
-        label = "[1/2]" if is_audio_only else "[1/3]"
-        # Call vot.get_translation_audio which handles polling and downloading
-        translation_success = vot.get_translation_audio(
-            url, duration, label, retry_callback=cli.ask_to_retry, use_live_voice=use_live_voice
+        # Запрос перевода (vot теперь только возвращает URL)
+        translation_success, audio_url = vot.get_translation_audio(
+            url, duration, use_live_voice=use_live_voice
         )
+        # Скачивание перевода теперь здесь
+        if translation_success and audio_url:
+            print(f"\n{config.COLOR_YELLOW}[2/3] Загрузка аудио перевода...{config.COLOR_RESET}")
+            try:
+                downloader.download_audio(audio_url, config.TEMP_AUDIO_FILENAME, retry_callback=cli.ask_to_retry)
+            except errors.YtrdError:
+                translation_success = False
     
     if is_audio_only:
         # Pass callbacks to avoid circular imports in downloader
