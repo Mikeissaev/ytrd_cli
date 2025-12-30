@@ -48,11 +48,15 @@ class TestGetBinaryPath:
     
     def test_get_binary_path_termux_fallback(self, monkeypatch):
         """Test fallback to Termux paths when not in system PATH."""
+        from ytrd import platform
+
+        # Mock platform detection to simulate Termux
+        monkeypatch.setattr(platform, 'detect_platform', lambda: platform.Platform.ANDROID_TERMUX)
         monkeypatch.setattr(shutil, 'which', lambda x: None)
-        
+
         def mock_exists(path):
             return "/data/data/com.termux" in path and "ffmpeg" in path
-        
+
         monkeypatch.setattr(os.path, 'exists', mock_exists)
         result = utils.get_binary_path("ffmpeg")
         assert result is not None
@@ -185,7 +189,10 @@ class TestCheckWritePermissions:
     
     def test_check_write_permissions_exits_on_creation_error(self, monkeypatch):
         """Test that function exits if directory creation fails."""
-        from ytrd import errors
+        from ytrd import errors, platform
+
+        # Mock platform to NOT be Termux (to avoid YtrdPlatformError)
+        monkeypatch.setattr(platform, 'IS_TERMUX', False)
 
         def mock_makedirs(path, *args, **kwargs):
             raise OSError("Permission denied")
@@ -193,13 +200,16 @@ class TestCheckWritePermissions:
         monkeypatch.setattr(os, 'makedirs', mock_makedirs)
         monkeypatch.setattr(os.path, 'exists', lambda x: False)
 
-        # Теперь выбрасывается YtrdFileError
+        # Должно выбрасываться YtrdFileError (не PlatformError)
         with pytest.raises(errors.YtrdFileError):
             utils.check_write_permissions("/invalid/path")
 
     def test_check_write_permissions_exits_on_no_write_access(self, monkeypatch, tmp_path):
         """Test that function exits if directory is not writable."""
-        from ytrd import errors
+        from ytrd import errors, platform
+
+        # Mock platform to NOT be Termux
+        monkeypatch.setattr(platform, 'IS_TERMUX', False)
 
         test_dir = tmp_path / "readonly"
         test_dir.mkdir()

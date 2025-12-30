@@ -12,17 +12,11 @@ from pathlib import Path
 import logging
 from . import config
 from . import errors
+from . import platform
 
 def get_default_output_dir():
-    """Returns the path to the download folder depending on the OS."""
-    # Check for Termux (Android)
-    if os.path.exists(config.TERMUX_PREFIX_PATH):
-        if os.path.exists("/sdcard/Download"):
-            return "/sdcard/Download"
-        return "/storage/emulated/0/Download"
-    
-    # Windows / Linux / MacOS
-    return str(Path.home() / "Downloads")
+    """Возвращает путь к папке загрузок (обёртка для обратной совместимости)."""
+    return str(platform.get_default_output_dir())
 
 def clean_name(name):
     if not name: return "Video_Dubbed"
@@ -30,23 +24,33 @@ def clean_name(name):
     return clean.strip()[:60]
 
 def check_write_permissions(path):
-    # If folder doesn't exist, try to create it
-    if not os.path.exists(path):
-        try:
-            os.makedirs(path)
-        except OSError as e:
-            raise errors.YtrdFileError(f"Не удалось создать папку {path}: {e}")
+    """Проверяет права на запись с учётом особенностей платформы."""
+    path_obj = Path(path)
 
-    if not os.access(path, os.W_OK):
+    if not path_obj.exists():
+        try:
+            path_obj.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            if platform.IS_TERMUX:
+                raise errors.YtrdPlatformError(
+                    f"Не удалось создать папку {path}. "
+                    f"На Android Termux убедитесь, что вы предоставили разрешение на запись: termux-setup-storage"
+                ) from e
+            raise errors.YtrdFileError(f"Не удалось создать папку {path}: {e}") from e
+
+    if not os.access(path_obj, os.W_OK):
+        if platform.IS_TERMUX:
+            raise errors.YtrdPlatformError(
+                f"Нет прав на запись в {path}. "
+                "Выполните: termux-setup-storage"
+            )
         raise errors.YtrdFileError(f"Нет прав на запись в {path}")
 
 
 def get_binary_path(tool_name):
-    path = shutil.which(tool_name)
-    if path: return path
-    termux_path = os.path.join(config.TERMUX_BIN_PATH, tool_name)
-    if os.path.exists(termux_path): return termux_path
-    return None
+    """Находит бинарный файл (обёртка для обратной совместимости)."""
+    path = platform.get_binary_path(tool_name)
+    return str(path) if path else None
 
 def cleanup(error=False):
     # If error occurred, do not delete files for debugging

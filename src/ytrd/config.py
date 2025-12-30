@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
+from . import platform
 
-# --- Termux Settings ---
-TERMUX_PREFIX_PATH = "/data/data/com.termux/files/usr"
-TERMUX_BIN_PATH = os.path.join(TERMUX_PREFIX_PATH, "bin")
+# --- Termux Settings (импортированы из platform.py для обратной совместимости) ---
+TERMUX_PREFIX_PATH = platform.TERMUX_PREFIX_PATH
+TERMUX_BIN_PATH = platform.TERMUX_BIN_PATH
 
 
 TEMP_VIDEO_FILENAME = "temp_video.mp4"
