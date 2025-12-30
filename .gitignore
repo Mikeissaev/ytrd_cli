@@ -34,3 +34,7 @@ GEMINI.md
 
 # Debug scripts
 debug_*.py
+
+# Environment variables (keep .env.example)
+.env
+!.env.example
