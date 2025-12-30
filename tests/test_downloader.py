@@ -103,7 +103,7 @@ class TestDownloadVideo:
     def test_download_video_critical_error_416(self, monkeypatch):
         """Test handling of critical 416 error with cleanup."""
         from ytrd import utils
-        
+
         mock_ydl_instance = MagicMock()
         # First call: 416 error
         # Second call: success after cleanup
@@ -111,29 +111,45 @@ class TestDownloadVideo:
             yt_dlp.utils.DownloadError("HTTP Error 416: Range Not Satisfiable"),
             {'duration': 100, 'height': 1080}
         ]
-        
+
         from contextlib import contextmanager
-        
+
         @contextmanager
         def mock_ydl_context(*args, **kwargs):
             yield mock_ydl_instance
-        
+
         monkeypatch.setattr(yt_dlp, 'YoutubeDL', mock_ydl_context)
-        
+
         # Mock callback to accept cleanup retry
         mock_callback = MagicMock(return_value=True)
-        
+
         mock_clean = MagicMock()
         monkeypatch.setattr(utils, 'clean_video_partials', mock_clean)
-        monkeypatch.setattr(os.path, 'exists', lambda x: True)
-        monkeypatch.setattr(os.path, 'getsize', lambda x: 1024)
-        
+
+        # Файл НЕ существует при первой ошибке (416)
+        # Появляется только после успешного скачивания
+        file_exists = [False]
+
+        def mock_exists(path):
+            return file_exists[0]
+
+        def mock_getsize(path):
+            return 200000  # Достаточно большой размер
+
+        # После очистки меняем состояние - файл появляется
+        def side_effect_clean(*args, **kwargs):
+            file_exists[0] = True
+
+        mock_clean.side_effect = side_effect_clean
+        monkeypatch.setattr(os.path, 'exists', mock_exists)
+        monkeypatch.setattr(os.path, 'getsize', mock_getsize)
+
         duration, height, path = downloader.download_video(
             "url",
             "path.mp4",
             retry_callback=mock_callback
         )
-        
+
         # Should have cleaned partials
         mock_clean.assert_called_once()
         assert duration == 100

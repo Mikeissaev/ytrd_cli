@@ -38,8 +38,9 @@ def run_pipeline():
     # Update args with interactive choices
     args.mix = mix_mode
     args.dual = dual_mode
-    
-    if not duration: duration = 341.0 # Fallback
+
+    if not duration:
+        duration = config.DEFAULT_VIDEO_DURATION
 
     is_audio_only = (selected_quality == 'audio')
     translation_success = False

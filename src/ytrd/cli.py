@@ -180,7 +180,6 @@ def validate_args_compatibility(args):
         args.mix = False
         args.dual = False
         args.quality = None
-        args.quality = None
         args.audio = False
         args.subtitles = False
     return args

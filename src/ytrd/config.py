@@ -51,3 +51,9 @@ HTTP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 RETRY_ATTEMPTS = 10
 RETRY_FRAGMENTS = 10
 RETRY_SLEEP_SECONDS = 5
+
+# --- Defaults ---
+DEFAULT_VIDEO_DURATION = 341.0  # Средняя длительность видео для fallback
+MIN_VALID_VIDEO_SIZE = 1024 * 100  # Минимальный размер валидного видео (100 KB)
+MIN_VALID_VIDEO_SIZE_TERMUX = 1024 * 50  # Для Termux (50 KB)
+MAX_FILENAME_LENGTH = 60  # Максимальная длина имени файла

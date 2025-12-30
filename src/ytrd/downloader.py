@@ -7,6 +7,7 @@ from tqdm import tqdm
 from . import config
 from . import utils
 from . import errors
+from . import platform
 
 class Logger:
     def debug(self, msg): pass
@@ -147,16 +148,26 @@ def download_video(url, path, quality_height=None, retry_callback=None):
                 pbar.close()
 
             # If file downloaded but yt-dlp crashed during post-processing (e.g. response parsing)
-            if os.path.exists(path) and os.path.getsize(path) > 1024:
-                # Silently return success as file exists
-                return 0, (quality_height if quality_height else 0), path
+            min_size = config.MIN_VALID_VIDEO_SIZE_TERMUX if platform.IS_TERMUX else config.MIN_VALID_VIDEO_SIZE
+            if os.path.exists(path):
+                size = os.path.getsize(path)
+                if size > min_size:
+                    # File exists and has reasonable size
+                    return 0, (quality_height if quality_height else 0), path
+                else:
+                    # File too small, likely corrupted
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                    raise errors.YtrdDownloadError(f"Скачанный файл слишком мал ({size} байт), возможно ошибка")
 
             error_msg = getattr(e, 'msg', str(e))
-            
+
             # If error 416 (Range Not Satisfiable) or codec problems, continuation is impossible.
             # Need to delete partially downloaded/corrupted files before retry.
             is_critical = "416" in error_msg or "codec parameters" in error_msg
-            
+
             # Use callback if provided, otherwise raise exception
             if not retry_callback:
                 raise errors.YtrdDownloadError(f"Сетевая ошибка: {error_msg}")
