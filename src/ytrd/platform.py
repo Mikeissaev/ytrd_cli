@@ -38,34 +38,34 @@ def detect_platform() -> Platform:
 
 def get_default_output_dir() -> Path:
     """Возвращает путь к папке загрузок с учётом платформы."""
-    platform = detect_platform()
+    platform_type = detect_platform()
 
-    if platform == Platform.ANDROID_TERMUX:
+    if platform_type == Platform.ANDROID_TERMUX:
         # Приоритет путей для Termux
         candidates = [
-            Path('/sdcard/Download'),
-            Path('/storage/emulated/0/Download'),
-            Path('/data/data/com.termux/files/home/downloads'),
+            '/sdcard/Download',
+            '/storage/emulated/0/Download',
+            '/data/data/com.termux/files/home/downloads',
         ]
-        for path in candidates:
-            if path.exists() and os.access(path, os.W_OK):
-                return path
+        for path_str in candidates:
+            if os.path.exists(path_str) and os.access(path_str, os.W_OK):
+                return Path(path_str)
         # Fallback - создать домашнюю директорию
         fallback = Path.home() / 'downloads'
-        fallback.mkdir(exist_ok=True)
+        os.makedirs(fallback, exist_ok=True)
         return fallback
 
-    elif platform == Platform.WINDOWS:
+    elif platform_type == Platform.WINDOWS:
         return Path.home() / 'Downloads'
 
     else:  # Linux, macOS
         # XDG Download directory
         download_dir = Path.home() / 'Downloads'
-        if download_dir.exists():
+        if os.path.exists(str(download_dir)):
             return download_dir
         # Fallback для некоторых Linux дистрибутивов с русским языком
         downloads_ru = Path.home() / 'Загрузки'
-        if downloads_ru.exists():
+        if os.path.exists(str(downloads_ru)):
             return downloads_ru
         return download_dir
 
@@ -79,9 +79,9 @@ def get_binary_path(name: str) -> Optional[Path]:
 
     # Для Termux - проверяем специальный путь
     if detect_platform() == Platform.ANDROID_TERMUX:
-        termux_bin = Path('/data/data/com.termux/files/usr/bin') / name
-        if termux_bin.exists():
-            return termux_bin
+        termux_bin_str = os.path.join('/data/data/com.termux/files/usr/bin', name)
+        if os.path.exists(termux_bin_str):
+            return Path(termux_bin_str)
 
     return None
 
@@ -98,13 +98,14 @@ def ensure_write_permission(path: Path) -> bool:
     Raises:
         OSError: Если не удаётся создать директорию
     """
-    if not path.exists():
+    path_str = str(path)
+    if not os.path.exists(path_str):
         try:
-            path.mkdir(parents=True, exist_ok=True)
+            os.makedirs(path_str, exist_ok=True)
         except OSError as e:
             raise OSError(f"Не удалось создать папку {path}: {e}")
 
-    return os.access(path, os.W_OK)
+    return os.access(path_str, os.W_OK)
 
 
 # Глобальные переменные для обратной совместимости и быстрого доступа

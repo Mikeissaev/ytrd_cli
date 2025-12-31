@@ -16,31 +16,36 @@
 ## Установка
 
 ### 1. Установка FFmpeg (Обязательно)
+
 Для работы программы необходим FFmpeg.
 
-*   **Android (Termux)**:
-    ```bash
-    pkg install ffmpeg
+#### Android (Termux)
+```bash
+pkg install ffmpeg
+```
+> **Важно:** Также может потребоваться выполнить `termux-setup-storage` для доступа к SD карте.
+
+#### Windows
+*   **Способ 1 (через winget)**:
+    ```powershell
+    winget install Gyan.FFmpeg
     ```
-*   **Windows**:
-    *   **Способ 1 (через winget)**:
-        ```powershell
-        winget install Gyan.FFmpeg
-        ```
-    *   **Способ 2 (вручную)**: Скачайте сборку с [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) или [официального сайта](https://ffmpeg.org/), распакуйте и добавьте путь к папке `bin` в переменные среды (PATH).
-*   **Linux (Ubuntu/Debian)**:
-    ```bash
-    sudo apt install ffmpeg
-    ```
+*   **Способ 2 (вручную)**: Скачайте сборку с [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) или [официального сайта](https://ffmpeg.org/), распакуйте и добавьте путь к папке `bin` в переменные среды (PATH).
+
+#### Linux (Ubuntu/Debian)
+```bash
+sudo apt install ffmpeg
+```
 
 ### 2. Установка приложения
 
-1.  Клонируйте репозиторий:
+1. Клонируйте репозиторий:
     ```bash
     git clone https://github.com/Mikeissaev/ytrd.git
     cd ytrd
     ```
-2.  Установите пакет:
+
+2. Установите пакет:
     ```bash
     pip install .
     ```
@@ -49,21 +54,57 @@
 
 Для настройки API ключа Yandex Translation создайте файл `.env`:
 
-**Android (Termux):**
+#### Android (Termux)
 ```bash
 mkdir -p ~/ytrd
-cp .env.example ~/ytrd/.env
-# Отредактируйте ~/ytrd/.env и добавьте свой VOT_HMAC_KEY
+echo "VOT_HMAC_KEY=ваш_ключ_здесь" > ~/ytrd/.env
 ```
 
-**Windows/Linux/macOS:**
+#### Windows/Linux/macOS
 ```bash
-cp .env.example ~/.config/ytrd/.env
-# Или установите переменную окружения:
+mkdir -p ~/.config/ytrd
+echo "VOT_HMAC_KEY=ваш_ключ_здесь" > ~/.config/ytrd/.env
+```
+
+Или установите переменную окружения:
+```bash
 export VOT_HMAC_KEY=ваш_ключ_здесь
 ```
 
 > **Примечание:** При использовании дефолтного ключа будет показано предупреждение. Рекомендуется получить собственный ключ для стабильной работы.
+
+## Установка на Android (Termux)
+
+### Специфичные шаги для Termux
+
+1. Установите зависимости:
+    ```bash
+    pkg update
+    pkg install python ffmpeg
+    ```
+
+2. Предоставьте права на хранилище (опционально):
+    ```bash
+    termux-setup-storage
+    ```
+
+3. Клонируйте и установите:
+    ```bash
+    git clone https://github.com/Mikeissaev/ytrd.git
+    cd ytrd
+    pip install .
+    ```
+
+4. Создайте конфигурацию:
+    ```bash
+    mkdir -p ~/ytrd
+    echo "VOT_HMAC_KEY=your_key_here" > ~/ytrd/.env
+    ```
+
+### Известные проблемы Termux
+
+*   Некоторые устройства могут не иметь `/sdcard/Download/`. В этом случае файлы сохраняются в `~/downloads/`
+*   Цвета в выводе можно отключить: `export TERMUX_ENABLE_COLORS=0`
 
 ## Использование
 
@@ -73,15 +114,39 @@ ytrd https://youtu.be/VIDEO_ID
 
 ### Опции
 
-*   `-h, --help`: Справка.
-*   `-m, --mix`: Режим смешивания дорожек(оригинал 20% + перевод 120%).
-*   `-d, --dual`: Режим двух дорожек (оригинал и перевод отдельно).
-*   `-q, --quality`: Выбрать качество (например, `-q 1080`).
-*   `-a, --audio`: Режим "Только аудио". Скачивает только переведенную (или оригинальную) аудиодорожку в MP3.
-*   `-s, --subtitles`: Скачать и вшить русские субтитры (если доступны).
-*   `-l, --live`: Использовать "Живой голос" (более качественная озвучка).
-*   `--clear-history`: Очистить историю скачиваний.
-*   `-o, --output`: Указать папку для сохранения.
+| Опция | Описание |
+|-------|----------|
+| `-h, --help` | Справка |
+| `-m, --mix` | Режим смешивания (оригинал 20% + перевод 120%) |
+| `-d, --dual` | Режим двух дорожек (оригинал и перевод отдельно) |
+| `-q, --quality` | Выбрать качество (например, `-q 1080`) |
+| `-a, --audio` | Режим "Только аудио" (MP3) |
+| `-s, --subtitles` | Скачать и вшить русские субтитры |
+| `-l, --live` | Использовать "Живой голос" (более качественная озвучка) |
+| `--clear-history` | Очистить историю скачиваний |
+| `-o, --output` | Указать папку для сохранения |
+
+### Примеры
+
+```bash
+# Скачать видео с переводом (интерактивный режим)
+ytrd https://youtu.be/VIDEO_ID
+
+# Скачать в режиме смешивания аудио
+ytrd https://youtu.be/VIDEO_ID -m
+
+# скачать 1080p с двумя аудиодорожками
+ytrd https://youtu.be/VIDEO_ID -q 1080 -d
+
+# Только аудиодорожку с переводом
+ytrd https://youtu.be/VIDEO_ID -a
+
+# С субтитрами
+ytrd https://youtu.be/VIDEO_ID -s
+```
+
 ## Требования
+
 *   Python 3.8+
 *   FFmpeg (должен быть доступен в PATH)
+

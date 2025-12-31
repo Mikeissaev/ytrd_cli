@@ -1,5 +1,4 @@
 import os
-import warnings
 from pathlib import Path
 from . import platform
 
@@ -31,18 +30,6 @@ PROGRESS_BAR_TIME_FORMAT = "{l_bar}{bar}| {n_fmt}/{total_fmt}s"
 # Попытка загрузить ключ из .env файла
 _DEFAULT_HMAC_KEY = 'bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf'
 _VOT_HMAC_KEY = os.getenv('VOT_HMAC_KEY', _DEFAULT_HMAC_KEY)
-
-if not os.getenv('VOT_HMAC_KEY'):
-    if platform.IS_TERMUX:
-        warnings.warn(
-            "Используется дефолтный VOT_HMAC_KEY. "
-            "Рекомендуется создать ~/ytrd/.env с VOT_HMAC_KEY для получения собственного ключа."
-        )
-    else:
-        warnings.warn(
-            "Используется дефолтный VOT_HMAC_KEY. "
-            "Рекомендуется установить VOT_HMAC_KEY через переменную окружения или .env файл."
-        )
 
 VOT_HMAC_KEY = _VOT_HMAC_KEY.encode() if isinstance(_VOT_HMAC_KEY, str) else _VOT_HMAC_KEY
 HTTP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 YaBrowser/24.4.0.0 Safari/537.36"
