@@ -5,7 +5,11 @@ from . import config
 from . import utils
 from . import downloader
 from . import errors
+from . import logger
 from ytrd import __version__
+
+# Инициализация логгера для модуля cli
+log = logger.get_logger(__name__)
 
 def ask_to_retry(error_message):
     """Prints error message and asks user to retry."""
@@ -198,6 +202,7 @@ class RussianArgumentParser(argparse.ArgumentParser):
         raise errors.YtrdValidationError(f"Ошибка аргументов: {message}")
 
 def parse_arguments():
+    log.debug("Parsing command-line arguments")
     epilog_text = """
 Примеры использования:
   ytrd https://youtu.be/VIDEO_ID          # Интерактивный режим
@@ -207,22 +212,22 @@ def parse_arguments():
   ytrd https://youtu.be/VIDEO_ID -s       # Скачать с субтитрами
   ytrd --clear-history                    # Очистить историю скачиваний
     """
-    
+
     parser = RussianArgumentParser(
         description="🚀 Утилита для скачивания видео с YouTube с автоматическим наложением голосового перевода.",
         epilog=epilog_text,
         formatter_class=argparse.RawTextHelpFormatter,
         add_help=False
     )
-    
+
     # Russify group headers
     parser._positionals.title = 'Позиционные аргументы'
     parser._optionals.title = 'Опции'
-    
+
     # Add standard help with Russian description
     parser.add_argument("-h", "--help", action="help", help="Показать это сообщение справки и выйти")
     parser.add_argument("-v", "--version", action="version", version=f"ytrd {__version__}", help="Показать версию программы и выйти")
-    
+
     parser.add_argument("url", nargs="?", help="Ссылка на видео YouTube.\nЕсли не указана, скрипт запросит её при запуске.")
     parser.add_argument("-o", "--output", default=utils.get_default_output_dir(), help=f"Папка для сохранения видео.\nПо умолчанию: {utils.get_default_output_dir()}")
     parser.add_argument("-m", "--mix", action="store_true", help="Режим смешивания (Mix).\nЕсли указан, оригинальная дорожка будет приглушена (20%%),\nа перевод наложен поверх (120%%).")
@@ -232,8 +237,9 @@ def parse_arguments():
     parser.add_argument("-s", "--subtitles", action="store_true", help="Скачать и вшить русские субтитры (если доступны).")
     parser.add_argument("-l", "--live", action="store_true", help="Использовать 'Живой голос'.\nБолее качественная и естественная озвучка.")
     parser.add_argument("--clear-history", action="store_true", help="Очистить файл истории скачиваний и выйти.")
-    
+
     args = parser.parse_args()
+    log.debug(f"Arguments parsed: url={args.url}, output={args.output}, mix={args.mix}, dual={args.dual}, quality={args.quality}, audio={args.audio}, subtitles={args.subtitles}, live={args.live}")
     return validate_args_compatibility(args)
 
 def ask_voice_type():
@@ -253,6 +259,7 @@ def ask_voice_type():
 
 def get_user_input_and_info(args):
     """Gets URL, analyzes video and asks for quality."""
+    log.debug("Getting user input and video info")
     url = args.url
     if not url:
         try:
@@ -319,5 +326,6 @@ def get_user_input_and_info(args):
             mix_mode = True
         elif mode_choice == 3:
             dual_mode = True
-        
+
+    log.info(f"User selected: quality={selected_quality}, live_voice={use_live_voice}, mix={mix_mode}, dual={dual_mode}")
     return url, selected_quality, title, uploader, duration, language, use_live_voice, mix_mode, dual_mode

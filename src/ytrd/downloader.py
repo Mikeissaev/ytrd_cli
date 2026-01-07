@@ -8,6 +8,10 @@ from . import config
 from . import utils
 from . import errors
 from . import platform
+from . import logger
+
+# Инициализация логгера для модуля downloader
+log = logger.get_logger(__name__)
 
 class Logger:
     def debug(self, msg): pass
@@ -16,6 +20,8 @@ class Logger:
 
 def process_audio_only(url, args, skip_translation, translation_success, uploader, title, file_exists_callback=None):
     """Handles the 'audio only' workflow."""
+    log.info(f"Processing audio-only mode: skip_translation={skip_translation}, translation_success={translation_success}")
+
     if skip_translation:
          print(f"\n{config.COLOR_YELLOW}[1/1] Загрузка оригинального аудио...{config.COLOR_RESET}")
          name = f"{utils.clean_name(uploader)} - {utils.clean_name(title)} [Original].mp3"
@@ -24,9 +30,11 @@ def process_audio_only(url, args, skip_translation, translation_success, uploade
              final_path = file_exists_callback(final_path)
          
          if download_youtube_audio(url, final_path):
+             log.info(f"Audio-only download completed: {final_path}")
              print(f"\n{config.COLOR_GREEN}✅ Готово!{config.COLOR_RESET}")
              print(f"📂 {final_path}")
          else:
+             log.error("Failed to download YouTube audio")
              print(f"{config.COLOR_RED}❌ Не удалось скачать аудио.{config.COLOR_RESET}")
 
     elif translation_success:
@@ -35,14 +43,17 @@ def process_audio_only(url, args, skip_translation, translation_success, uploade
         final_path = os.path.join(args.output, name)
         if file_exists_callback:
              final_path = file_exists_callback(final_path)
-        
+
         try:
             shutil.copy(config.TEMP_AUDIO_FILENAME, final_path)
+            log.info(f"Translation audio saved: {final_path}")
             print(f"\n{config.COLOR_GREEN}✅ Готово!{config.COLOR_RESET}")
             print(f"📂 {final_path}")
         except Exception as e:
+            log.error(f"Failed to save translation audio: {e}", exc_info=True)
             print(f"{config.COLOR_RED}❌ Не удалось сохранить аудио: {e}{config.COLOR_RESET}")
     else:
+        log.warning("Translation not found, audio-only download cancelled")
         print(f"{config.COLOR_RED}❌ Перевод не найден. Скачивание аудио отменено.{config.COLOR_RESET}")
     
     utils.cleanup()
@@ -51,6 +62,7 @@ def process_audio_only(url, args, skip_translation, translation_success, uploade
 @utils.retry_on_network_error()
 def get_available_qualities(url):
     """Gets available video resolutions, title and author."""
+    log.debug(f"Fetching video info for URL: {url}")
     print(f"{config.COLOR_YELLOW}Анализ...{config.COLOR_RESET}")
     opts = {'quiet': True, 'no_warnings': True, 'logger': Logger()}
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -66,10 +78,12 @@ def get_available_qualities(url):
                 if 'storyboard' in (f.get('format_note') or ''): continue
 
                 heights.add(h)
+        log.debug(f"Available qualities: {sorted(list(heights), reverse=True)}")
         return sorted(list(heights), reverse=True), info.get('title', 'Video'), info.get('uploader', 'Unknown'), info.get('duration', 0), info.get('language')
 
 def download_video(url, path, quality_height=None, retry_callback=None):
     """Downloads video from YouTube using yt-dlp with retry logic."""
+    log.info(f"Starting video download: url={url}, quality={quality_height}, path={path}")
     # Define threshold for High-Res (anything above 1080p is considered High-Res)
     is_high_res = quality_height and quality_height > 1080
     
@@ -141,6 +155,7 @@ def download_video(url, path, quality_height=None, retry_callback=None):
                 info = ydl.extract_info(url, download=True)
                 if pbar and not pbar.disable:
                     pbar.close()
+                log.info(f"Video download completed: title={info.get('title')}, height={info.get('height')}, path={path}")
                 return info.get('duration', 0), info.get('height', 0), path
 
         except (OSError, requests.exceptions.RequestException, yt_dlp.utils.DownloadError, ValueError) as e:
@@ -153,6 +168,7 @@ def download_video(url, path, quality_height=None, retry_callback=None):
                 size = os.path.getsize(path)
                 if size > min_size:
                     # File exists and has reasonable size
+                    log.warning(f"Video file exists after error (post-processing crash): {size} bytes, treating as success")
                     return 0, (quality_height if quality_height else 0), path
                 else:
                     # File too small, likely corrupted
@@ -160,13 +176,18 @@ def download_video(url, path, quality_height=None, retry_callback=None):
                         os.remove(path)
                     except OSError:
                         pass
+                    log.error(f"Downloaded file too small ({size} bytes), likely corrupted")
                     raise errors.YtrdDownloadError(f"Скачанный файл слишком мал ({size} байт), возможно ошибка")
 
             error_msg = getattr(e, 'msg', str(e))
+            log.warning(f"Network error during video download: {error_msg}")
 
             # If error 416 (Range Not Satisfiable) or codec problems, continuation is impossible.
             # Need to delete partially downloaded/corrupted files before retry.
             is_critical = "416" in error_msg or "codec parameters" in error_msg
+
+            if is_critical:
+                log.error(f"Critical download error: {error_msg}")
 
             # Use callback if provided, otherwise raise exception
             if not retry_callback:
@@ -184,6 +205,7 @@ def download_video(url, path, quality_height=None, retry_callback=None):
 
 def download_audio(url, path, retry_callback=None):
     """Downloads translation audio track with retry logic."""
+    log.debug(f"Downloading translation audio from: {url} to {path}")
     pbar = None
     while True:
         try:
@@ -198,8 +220,9 @@ def download_audio(url, path, retry_callback=None):
                 for chunk in r.iter_content(1024):
                     pbar.update(len(chunk))
                     f.write(chunk)
-            
+
             pbar.close()
+            log.info(f"Translation audio download completed: {path}")
             return # Successful completion
 
         except (OSError, requests.exceptions.RequestException) as e:
@@ -207,11 +230,13 @@ def download_audio(url, path, retry_callback=None):
                 pbar.close()
 
             error_msg = str(e)
+            log.warning(f"Network error during audio download: {error_msg}")
             if not retry_callback or not retry_callback(f"Сетевая ошибка при скачивании аудио: {error_msg}"):
                 raise errors.YtrdUserCancelled("Завершение работы по требованию пользователя")
 
 def download_youtube_audio(url, path):
     """Downloads audio from YouTube in MP3 format."""
+    log.debug(f"Downloading YouTube audio: url={url}, path={path}")
     # Remove extension from path for outtmpl as converter will add .mp3
     base_path = os.path.splitext(path)[0]
     
@@ -254,9 +279,11 @@ def download_youtube_audio(url, path):
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
             pbar.close()
+            log.info(f"YouTube audio download completed: {path}")
             return True
     except Exception as e:
         pbar.close()
+        log.error(f"YouTube audio download failed: {e}", exc_info=True)
         print(f"{config.COLOR_RED}❌ Ошибка скачивания аудио: {e}{config.COLOR_RESET}")
         return False
 
@@ -264,15 +291,17 @@ def download_subtitles(url, base_path, cookies_path=None):
     """
     Downloads subtitles separately. Tries Russian first, then English as fallback.
     Returns tuple (path, language) if successful, else (None, None).
-    
+
     Args:
         url: YouTube video URL
         base_path: Base path for subtitle file (without extension)
         cookies_path: Optional path to cookies file (Netscape format)
     """
+    log.debug(f"Downloading subtitles: url={url}, base_path={base_path}, cookies={cookies_path}")
     # Auto-detect persistent cookies if not explicitly provided
     if not cookies_path and os.path.exists(config.COOKIES_FILE_PATH):
         cookies_path = config.COOKIES_FILE_PATH
+        log.info("Using persistent cookies for subtitles")
         print(f"{config.COLOR_CYAN}🔐 Используются сохраненные cookies{config.COLOR_RESET}")
     
     if cookies_path:
@@ -318,25 +347,31 @@ def download_subtitles(url, base_path, cookies_path=None):
             for c in candidates:
                 if os.path.exists(c):
                     if lang_code != 'ru':
+                        log.info(f"Using {lang_name} subtitles as fallback (Russian not found)")
                         print(f"{config.COLOR_CYAN}ℹ️ Русские субтитры не найдены, используются {lang_name}.{config.COLOR_RESET}")
+                    else:
+                        log.info(f"Subtitles downloaded successfully: {c}")
                     return c, lang_meta  # Return path and language code for metadata
             
         except Exception as e:
             error_str = str(e)
-            
+
             # Check if it's a rate limiting error (429) or forbidden (403)
             is_rate_limit = "429" in error_str or "Too Many Requests" in error_str
             is_forbidden = "403" in error_str or "Forbidden" in error_str
-            
+
             if is_rate_limit or is_forbidden:
+                log.warning(f"Rate limit or forbidden error for subtitles: {error_str}")
                 # Only show error on first attempt (Russian)
                 if lang_code == 'ru':
                     print(f"{config.COLOR_YELLOW}⚠️ Превышен лимит запросов YouTube (HTTP 429). Попробуйте позже.{config.COLOR_RESET}")
                 return None, None
             # For other errors, try next language
+            log.debug(f"Subtitles download failed for {lang_code}: {error_str}")
             continue
-    
+
     # If no subtitles found in any language
+    log.warning("Subtitles not found in any language")
     print(f"{config.COLOR_YELLOW}⚠️ Ошибка при скачивании субтитров: субтитры не найдены{config.COLOR_RESET}")
     return None, None
 

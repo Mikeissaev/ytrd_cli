@@ -8,6 +8,10 @@ from . import config
 from . import utils
 from . import cli
 from . import errors
+from . import logger
+
+# Инициализация логгера для модуля ffmpeg
+log = logger.get_logger(__name__)
 
 def build_ffmpeg_command(mode, final_path, is_mkv=False, sub_path=None, sub_lang='rus'):
     """
@@ -126,12 +130,13 @@ def build_ffmpeg_command(mode, final_path, is_mkv=False, sub_path=None, sub_lang
 def run_ffmpeg(cmd_list, duration, mode_name="FFmpeg"):
     """
     Executes the FFmpeg command with a progress bar.
-    
+
     Args:
         cmd_list (list): The command to execute.
         duration (float): Video duration in seconds (for progress bar).
         mode_name (str): Label for the progress bar.
     """
+    log.debug(f"Running FFmpeg: {' '.join(cmd_list[:5])}...")
     # Replace quiet with error for debugging purposes if needed
     try:
         idx = cmd_list.index('-loglevel')
@@ -149,13 +154,14 @@ def run_ffmpeg(cmd_list, duration, mode_name="FFmpeg"):
         proc = subprocess.Popen(
             cmd_list,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, 
+            stderr=subprocess.STDOUT,
             universal_newlines=True,
             shell=False,
-            bufsize=1, 
+            bufsize=1,
             encoding='utf-8',
             errors='replace'
         )
+        log.debug(f"FFmpeg started with PID: {proc.pid}")
         
         fmt = config.PROGRESS_BAR_TIME_FORMAT
         duration = int(duration) if duration else 100
@@ -219,12 +225,16 @@ def run_ffmpeg(cmd_list, duration, mode_name="FFmpeg"):
                 pbar.refresh()
         
         pbar.close()
-        
+
         if rc != 0:
+            log.error(f"FFmpeg failed with code {rc}: {''.join(full_log[-20:])}")
             error_msg = f"Ошибка FFmpeg (код {rc})\nКоманда: {shlex.join(cmd_list)}\nЛог: {''.join(full_log[-20:])}"
             raise errors.YtrdExternalToolError(error_msg)
 
+        log.info(f"FFmpeg completed successfully: {mode_name}")
+
     except (OSError, FileNotFoundError) as e:
+        log.critical(f"Failed to start FFmpeg: {e}", exc_info=True)
         raise errors.YtrdExternalToolError(
             f"Ошибка запуска FFmpeg: {e}\nУбедитесь, что ffmpeg установлен и доступен в PATH"
         )
@@ -238,13 +248,15 @@ def convert_to_srt(sub_path):
     """
     if not sub_path or not os.path.exists(sub_path):
         return None
-    
+
     if os.path.getsize(sub_path) == 0:
+        log.warning(f"Subtitle file is empty: {sub_path}")
         print(f"{config.COLOR_YELLOW}⚠️ Файл субтитров пуст, пропускаем.{config.COLOR_RESET}")
         return None
 
     # If already SRT, just return it
     if sub_path.endswith('.srt'):
+        log.debug(f"Subtitle file already in SRT format: {sub_path}")
         return sub_path
 
     # Try to convert to SRT
@@ -256,36 +268,42 @@ def convert_to_srt(sub_path):
     try:
         # Check if SRT already exists and is valid
         if os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
+            log.debug(f"SRT file already exists: {srt_path}")
             return srt_path
-            
+
+        log.debug(f"Converting subtitles to SRT: {sub_path} -> {srt_path}")
         cmd = [ffmpeg_exec, '-y', '-loglevel', 'error', '-i', sub_path, srt_path]
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        
+
         if os.path.exists(srt_path) and os.path.getsize(srt_path) > 0:
+            log.info(f"Subtitles converted to SRT: {srt_path}")
             return srt_path
     except Exception as e:
         # Conversion failed, print warning but return original (maybe ffmpeg can handle it)
         # However, for MP4, VTT often fails with mov_text if not converted.
         # But we return original as fallback.
+        log.warning(f"Failed to convert subtitles to SRT: {e}")
         print(f"{config.COLOR_YELLOW}⚠️ Не удалось конвертировать субтитры в SRT: {e}{config.COLOR_RESET}")
         pass
-        
+
     return sub_path
 
 def process_video_merge(current_path, ext, translation_success, uploader, title, actual_height, args, duration, sub_path=None, sub_lang='rus'):
     """Handles the video merging/processing workflow."""
-    
+    log.info(f"Processing video merge: translation_success={translation_success}, ext={ext}, has_subtitles={bool(sub_path)}")
+
     # Pre-process subtitles: Convert and Validate
     if sub_path:
         sub_path = convert_to_srt(sub_path)
         if not sub_path:
+            log.warning("Subtitles were dropped (empty file or error)")
             print(f"{config.COLOR_YELLOW}⚠️ Субтитры были отброшены (пустой файл или ошибка).{config.COLOR_RESET}")
 
     # Use FFmpeg to merge video and audio.
     # Depending on mode, either copy streams or use amix filter.
     if translation_success:
         print(f"\n{config.COLOR_YELLOW}[3/3] Сборка файла...{config.COLOR_RESET}")
-        
+
         mode = 2 # Default (Mix)
         if args.mix:
             mode = 2
@@ -293,23 +311,25 @@ def process_video_merge(current_path, ext, translation_success, uploader, title,
             mode = 3
         else:
             mode = cli.ask_merge_mode()
-            
+
         # Mode short tags
         mode_tags = {1: "Dub", 2: "Mix", 3: "Dual"}
-        
+
         mode_str = f"[{mode_tags.get(mode, 'Dub')}]"
         mode_name = mode_tags.get(mode, 'FFmpeg').upper()
-        
+        log.info(f"Selected merge mode: {mode_name} ({mode})")
+
         # Resolution
         res_str = f"[{actual_height}p]" if actual_height else ""
-        
+
         # Use the same extension for final file as for video
         name = f"{utils.clean_name(uploader)} - {utils.clean_name(title)} {res_str}{mode_str}.{ext}"
         final_path = os.path.join(args.output, name)
-        
+
         # --- Existence check ---
         final_path = cli.handle_existing_file(final_path)
-        
+
+        log.info(f"Final output path: {final_path}")
         cmd_list = build_ffmpeg_command(mode, final_path, is_mkv=(ext=='mkv'), sub_path=sub_path, sub_lang=sub_lang)
         
         # Substitute input file in command (config.TEMP_VIDEO_FILENAME -> current_path)
@@ -329,14 +349,15 @@ def process_video_merge(current_path, ext, translation_success, uploader, title,
         res_str = f"[{actual_height}p]" if actual_height else ""
         name = f"{utils.clean_name(uploader)} - {utils.clean_name(title)} {res_str}.{ext}"
         final_path = os.path.join(args.output, name)
-        
+
         # --- Existence check ---
         final_path = cli.handle_existing_file(final_path)
-        
+
         if sub_path:
             # Need to use ffmpeg to embed subtitles into video
             print(f"\n{config.COLOR_YELLOW}Встраивание субтитров...{config.COLOR_RESET}")
-            
+            log.info(f"Embedding subtitles into video: {sub_path}")
+
             ffmpeg_exec = utils.get_binary_path('ffmpeg') or 'ffmpeg'
             is_mkv = (ext == 'mkv')
             
@@ -373,15 +394,20 @@ def process_video_merge(current_path, ext, translation_success, uploader, title,
         else:
             # Just copy file without processing
             print(f"Копирование файла в '{final_path}'...")
+            log.debug(f"Copying file without processing: {current_path} -> {final_path}")
             try:
                 shutil.copy(current_path, final_path)
+                log.info(f"File copied successfully: {final_path}")
             except Exception as e:
+                log.error(f"Failed to copy file: {e}", exc_info=True)
                 print(f"{config.COLOR_RED}❌ Не удалось скопировать файл: {e}{config.COLOR_RESET}")
 
     # --- Completion ---
     utils.cleanup()
     if os.path.exists(final_path):
+        log.info(f"Video processing completed successfully: {final_path}")
         print(f"\n{config.COLOR_GREEN}✅ Готово!{config.COLOR_RESET}")
         print(f"📂 {final_path}")
     else:
+        log.warning("Operation cancelled, temporary files removed")
         print(f"\n{config.COLOR_YELLOW}Операция отменена. Временные файлы удалены.{config.COLOR_RESET}")

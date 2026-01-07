@@ -9,10 +9,13 @@ import functools
 import requests
 import yt_dlp
 from pathlib import Path
-import logging
 from . import config
 from . import errors
 from . import platform
+from . import logger
+
+# Инициализация логгера для модуля utils
+log = logger.get_logger(__name__)
 
 def get_default_output_dir():
     """Возвращает путь к папке загрузок (обёртка для обратной совместимости)."""
@@ -57,14 +60,14 @@ def cleanup(error=False):
     if error:
         #print(f"{config.COLOR_YELLOW}⚠️ Временные файлы оставлены для проверки: {config.TEMP_VIDEO_FILENAME}, {config.TEMP_AUDIO_FILENAME}{config.COLOR_RESET}")
         return
-    
+
     # Delete all temporary video and audio files
     files_to_remove = glob.glob("temp_video*") + glob.glob("temp_audio*")
     for f in files_to_remove:
         try:
             os.remove(f)
         except OSError as e:
-            logging.debug(f"Could not remove temporary file {f}: {e}")
+            log.debug(f"Could not remove temporary file {f}: {e}")
 
 
 
@@ -116,7 +119,7 @@ def clean_video_partials():
         try:
             os.remove(f)
         except OSError as e:
-            logging.debug(f"Could not remove partial file {f}: {e}")
+            log.debug(f"Could not remove partial file {f}: {e}")
 
 def extract_video_id(url):
     """

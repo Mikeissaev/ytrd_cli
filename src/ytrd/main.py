@@ -8,6 +8,10 @@ from . import downloader
 from . import ffmpeg
 from . import history
 from . import errors
+from . import logger
+
+# Инициализация логгера для модуля main
+log = logger.get_logger(__name__)
 
 def run_pipeline():
     """Main execution pipeline (Conductor)."""
@@ -163,32 +167,43 @@ def run_pipeline():
 
 def entry_point():
     """CLI entry point."""
-    # Fix encoding for Windows console
-    if sys.platform == "win32":
-        sys.stdout.reconfigure(encoding='utf-8')
-
-    # Add Termux paths
-    os.environ["PATH"] = f"{config.TERMUX_BIN_PATH}:{os.environ.get('PATH', '')}"
+    # Инициализация логирования (первая операция)
+    logger.setup_logging()
 
     try:
+        # Fix encoding for Windows console
+        if sys.platform == "win32":
+            sys.stdout.reconfigure(encoding='utf-8')
+
+        # Add Termux paths
+        os.environ["PATH"] = f"{config.TERMUX_BIN_PATH}:{os.environ.get('PATH', '')}"
+
+        log.info("Application entry point called")
         run_pipeline()
     except KeyboardInterrupt:
+        log.info("User interrupted (KeyboardInterrupt)")
         utils.cleanup()
         sys.exit(0)
     except errors.YtrdUserCancelled as e:
         # Пользователь отменил операцию - тихий выход
+        log.info(f"User cancelled: {e}")
         utils.cleanup()
         sys.exit(0)
     except errors.YtrdError as e:
         # Ошибки приложения - показать сообщение и выйти с кодом 1
+        log.error(f"Application error: {type(e).__name__}: {e}", exc_info=True)
         print(f"{config.COLOR_RED}❌ Ошибка: {e}{config.COLOR_RESET}")
         utils.cleanup(True)
         sys.exit(1)
     except Exception as e:
         # Неожиданные ошибки
+        log.critical(f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
         print(f"{config.COLOR_RED}❌ Неожиданная ошибка: {e}{config.COLOR_RESET}")
         utils.cleanup(True)
         sys.exit(1)
+    finally:
+        # Завершение логирования (последняя операция)
+        logger.shutdown_logging()
 
 if __name__ == "__main__":
     entry_point()

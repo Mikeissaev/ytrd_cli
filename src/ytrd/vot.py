@@ -10,6 +10,10 @@ from typing import Optional, Tuple
 from . import config
 from . import utils
 from . import errors
+from . import logger
+
+# Инициализация логгера для модуля vot
+log = logger.get_logger(__name__)
 
 def get_translation_audio(
     url: str,
@@ -26,6 +30,7 @@ def get_translation_audio(
     Returns:
         Кортеж (success: bool, audio_url: str | None)
     """
+    log.info(f"Starting translation polling: url={url}, duration={duration}, live_voice={use_live_voice}")
     print(f"\n{config.COLOR_YELLOW}[1/3] Запрос перевода{' (Живой голос)' if use_live_voice else ''}...{config.COLOR_RESET}")
 
     # Polling (maximum defined in config)
@@ -34,6 +39,7 @@ def get_translation_audio(
         result = translate_video(url, duration, use_live_voice)
 
         if not result.get("success"):
+            log.error(f"Translation API error: {result.get('message')}")
             print(f"{config.COLOR_RED}❌ Ошибка API перевода: {result.get('message')}{config.COLOR_RESET}")
             return False, None
 
@@ -41,20 +47,25 @@ def get_translation_audio(
         if status == "Ready":
             audio_url = result.get("url")
             if audio_url:
+                log.info("Translation is ready")
                 print(f"{config.COLOR_GREEN}✅ Перевод готов!{config.COLOR_RESET}")
                 return True, audio_url
             else:
-                 print(f"{config.COLOR_RED}❌ Ошибка: Статус Ready, но нет URL.{config.COLOR_RESET}")
-                 return False, None
+                log.error("Translation status Ready but no URL returned")
+                print(f"{config.COLOR_RED}❌ Ошибка: Статус Ready, но нет URL.{config.COLOR_RESET}")
+                return False, None
 
         elif status == "Waiting":
+            log.debug(f"Translation in progress (attempt {attempt+1}/{max_attempts})")
             print(f"{config.COLOR_YELLOW}⏳ Перевод в процессе... (Попытка {attempt+1}/{max_attempts}){config.COLOR_RESET}")
             time.sleep(config.RETRY_SLEEP_SECONDS)
 
         else:
-             print(f"{config.COLOR_RED}❌ Неизвестный статус или ошибка: {result.get('message')}{config.COLOR_RESET}")
-             return False, None
+            log.error(f"Unknown translation status or error: {result.get('message')}")
+            print(f"{config.COLOR_RED}❌ Неизвестный статус или ошибка: {result.get('message')}{config.COLOR_RESET}")
+            return False, None
 
+    log.error("Translation polling timeout")
     print(f"{config.COLOR_RED}❌ Время ожидания перевода истекло.{config.COLOR_RESET}")
     return False, None
 
@@ -171,7 +182,10 @@ def get_signature(body: bytes) -> str:
 def translate_video(url: str, duration: float = 341.0, use_live_voice: bool = False) -> dict:
     video_id = utils.extract_video_id(url)
     if not video_id:
+        log.warning(f"Invalid YouTube URL: {url}")
         return {"success": False, "message": "Invalid YouTube URL"}
+
+    log.debug(f"Requesting translation: url={url}, video_id={video_id}, duration={duration}, live_voice={use_live_voice}")
 
     # Video ID is used for validation only, but the request itself requires URL
     
@@ -207,40 +221,57 @@ def translate_video(url: str, duration: float = 341.0, use_live_voice: bool = Fa
             timeout=10
         )
         response.raise_for_status()
+        log.debug(f"VOT API response status: {response.status_code}")
     except requests.exceptions.RequestException as e:
-         return {"success": False, "message": f"Network error: {str(e)}"}
+        log.error(f"VOT API request failed: {e}", exc_info=True)
+        return {"success": False, "message": f"Network error: {str(e)}"}
 
     reader = SimpleProtobufReader(response.content)
     
     status = reader.get_int(4)
     message = reader.get_string(9)
     audio_url = reader.get_string(1)
-    
+
+    log.debug(f"VOT response: status={status}, message={message}, has_audio_url={bool(audio_url)}")
+
     if status == 1:
         return {
-            "success": True, 
+            "success": True,
             "status": "Ready",
             "url": audio_url,
             "message": "Translation ready"
         }
     elif status == 2:
         return {
-            "success": True, 
+            "success": True,
             "status": "Waiting",
             "url": None,
             "message": "Translation will take a few minutes"
         }
+    elif status == 7:
+        # Статус 7 - перевод в процессе/инициализации (новый статус VOT API)
+        log.info(f"VOT status 7: Translation initializing, will retry")
+        return {
+            "success": True,
+            "status": "Waiting",
+            "url": None,
+            "message": "Translation is being prepared"
+        }
     elif status == 0:
+        log.warning(f"VOT returned error status: {message}")
         return {
             "success": False,
-            "status": "Error", 
+            "status": "Error",
             "url": None,
             "message": message if message else "Unknown error"
         }
     else:
-         return {
+        # Другие неизвестные статусы считаем ошибкой
+        log.warning(f"VOT returned unknown status: {status}, message: {message}")
+        error_msg = message if message else f"Перевод недоступен (код: {status})"
+        return {
             "success": False,
-            "status": "Unknown", 
+            "status": "Error",
             "url": None,
-            "message": f"Unknown status: {status}"
+            "message": error_msg
         }
