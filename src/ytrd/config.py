@@ -32,12 +32,12 @@ _DEFAULT_HMAC_KEY = 'bt8xH3VOlb4mqf0nqAibnDOoiPlXsisf'
 _VOT_HMAC_KEY = os.getenv('VOT_HMAC_KEY', _DEFAULT_HMAC_KEY)
 
 VOT_HMAC_KEY = _VOT_HMAC_KEY.encode() if isinstance(_VOT_HMAC_KEY, str) else _VOT_HMAC_KEY
-HTTP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 YaBrowser/24.4.0.0 Safari/537.36"
+HTTP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 
 # --- Retry Parameters ---
-RETRY_ATTEMPTS = 10
-RETRY_FRAGMENTS = 10
-RETRY_SLEEP_SECONDS = 5
+RETRY_ATTEMPTS = 15
+RETRY_FRAGMENTS = 15
+RETRY_SLEEP_SECONDS = 7
 
 # --- Defaults ---
 DEFAULT_VIDEO_DURATION = 341.0  # Средняя длительность видео для fallback

@@ -14,13 +14,37 @@ log = logger.get_logger(__name__)
 def ask_to_retry(error_message):
     """Prints error message and asks user to retry."""
     print(f"\n{config.COLOR_RED}❌ {error_message}{config.COLOR_RESET}")
+    
+    # Special handling for 403 Forbidden or Format not available
+    is_forbidden = "403" in error_message or "Forbidden" in error_message
+    is_format_error = "Requested format is not available" in error_message
+    
     while True:
         try:
-            choice = input(f"{config.COLOR_YELLOW}Попробовать снова? (y/n): {config.COLOR_RESET}").lower().strip()
+            prompt = f"{config.COLOR_YELLOW}Попробовать снова? (y/n"
+            if is_forbidden or is_format_error:
+                prompt += "/c - cookies"
+            if is_format_error and os.path.exists(config.COOKIES_FILE_PATH):
+                prompt += "/x - delete cookies and retry"
+            prompt += f"): {config.COLOR_RESET}"
+            
+            choice = input(prompt).lower().strip()
+            
             if choice in ('y', 'yes', 'д', 'да'):
                 return True
             if choice in ('n', 'no', 'н', 'нет'):
                 return False
+            if (is_forbidden or is_format_error) and (choice in ('c', 'cookies', 'с')):
+                # Ask for cookies and then retry
+                cookies_path = ask_cookies_path()
+                return bool(cookies_path)
+            if is_format_error and choice == 'x':
+                try:
+                    os.remove(config.COOKIES_FILE_PATH)
+                    print(f"{config.COLOR_YELLOW}Cookies удалены. Повторная попытка...{config.COLOR_RESET}")
+                    return True
+                except OSError:
+                    return False
         except (KeyboardInterrupt, EOFError):
             return False
 
@@ -282,7 +306,7 @@ def get_user_input_and_info(args):
     
     # Always get video info (including duration)
     # Note: get_available_qualities was moved to downloader
-    qualities, title, uploader, duration, language = downloader.get_available_qualities(url)
+    qualities, title, uploader, duration, language = downloader.get_available_qualities(url, retry_callback=ask_to_retry)
     
     # If quality specified by argument but not in list - reset selection
     if selected_quality and selected_quality not in qualities:
@@ -294,23 +318,30 @@ def get_user_input_and_info(args):
          selected_quality = 'audio'
     
     interactive_mode = False
-    if not selected_quality and qualities:
+    if not selected_quality:
         interactive_mode = True
         print(f"🎥 {title}")
         print(f"{config.COLOR_YELLOW}Выберите качество:{config.COLOR_RESET}")
-        for i, q in enumerate(qualities, 1):
-            print(f"  [{i}] {q}p")
+        
+        # Display qualities if found, otherwise show "Best"
+        if qualities:
+            for i, q in enumerate(qualities, 1):
+                print(f"  [{i}] {q}p")
+        else:
+            print(f"  [1] Лучшее качество (авто)")
+            
         print(f"  [0] Только аудио")
         try:
             choice = input(f"Выбор [1]: ").strip()
             if choice == '0':
                 selected_quality = 'audio'
-            elif not choice:
-                selected_quality = qualities[0]
+            elif not choice or (not qualities and choice == '1'):
+                selected_quality = qualities[0] if qualities else None
             else:
                 selected_quality = qualities[int(choice) - 1]
         except (ValueError, IndexError, EOFError, KeyboardInterrupt):
-            pass 
+            # Fallback to best if something goes wrong
+            selected_quality = qualities[0] if qualities else None
     
     use_live_voice = args.live
     if interactive_mode and not use_live_voice:

@@ -29,8 +29,9 @@ temp_*
 .vscode/
 .idea/
 
-# Gemini Context
-GEMINI.md
+# Markdown documentation (keep README.md tracked)
+*.md
+!README.md
 
 # Debug scripts
 debug_*.py
@@ -38,3 +39,6 @@ debug_*.py
 # Environment variables (keep .env.example)
 .env
 !.env.example
+
+# Cookies
+cookies.txt

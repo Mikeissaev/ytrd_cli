@@ -289,7 +289,7 @@ class TestGetUserInputAndInfo:
             'get_available_qualities',
 
 
-            lambda url: ([1080, 720], "Test Video", "Test Channel", 341.0, "en")
+            lambda url, **kwargs: ([1080, 720], "Test Video", "Test Channel", 341.0, "en")
 
 
         )
@@ -370,7 +370,7 @@ class TestGetUserInputAndInfo:
             'get_available_qualities',
 
 
-            lambda url: ([1080, 720], "Test", "Ch", 100.0, "en")
+            lambda url, **kwargs: ([1080, 720], "Test", "Ch", 100.0, "en")
 
 
         )

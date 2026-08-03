@@ -59,8 +59,8 @@ def process_audio_only(url, args, skip_translation, translation_success, uploade
     utils.cleanup()
     return
 
-@utils.retry_on_network_error()
-def get_available_qualities(url):
+@utils.retry_on_network_error(retry_callback=None)
+def get_available_qualities(url, retry_callback=None):
     """Gets available video resolutions, title and author."""
     log.debug(f"Fetching video info for URL: {url}")
     print(f"{config.COLOR_YELLOW}Анализ...{config.COLOR_RESET}")
@@ -81,7 +81,7 @@ def get_available_qualities(url):
         log.debug(f"Available qualities: {sorted(list(heights), reverse=True)}")
         return sorted(list(heights), reverse=True), info.get('title', 'Video'), info.get('uploader', 'Unknown'), info.get('duration', 0), info.get('language')
 
-def download_video(url, path, quality_height=None, retry_callback=None):
+def download_video(url, path, quality_height=None, retry_callback=None, work_dir=None):
     """Downloads video from YouTube using yt-dlp with retry logic."""
     log.info(f"Starting video download: url={url}, quality={quality_height}, path={path}")
     # Define threshold for High-Res (anything above 1080p is considered High-Res)
@@ -198,7 +198,7 @@ def download_video(url, path, quality_height=None, retry_callback=None):
                     # If critical error for file, ask user to RESTART from scratch
                     if retry_callback(f"Критическая ошибка файла ({error_msg}).\n{config.COLOR_YELLOW}Очистить временные файлы и скачать заново?"):
                         print(f"{config.COLOR_YELLOW}Очистка временных файлов видео...{config.COLOR_RESET}")
-                        utils.clean_video_partials()
+                        utils.clean_video_partials(work_dir)
                         continue
 
                 raise errors.YtrdUserCancelled("Завершение работы по требованию пользователя")

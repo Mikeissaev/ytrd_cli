@@ -44,10 +44,28 @@ class TestGetDefaultOutputDir:
     @patch('ytrd.platform.detect_platform')
     @patch('os.access')
     @patch('os.path.exists')
+    @patch('os.makedirs')
+    def test_get_default_output_dir_termux_youtube(self, mock_makedirs, mock_exists, mock_access, mock_detect):
+        mock_detect.return_value = platform.Platform.ANDROID_TERMUX
+        # Мокаем os.path.exists чтобы возвращал True для /sdcard/Download/Youtube
+        mock_exists.side_effect = lambda p: p == '/sdcard/Download/Youtube'
+        mock_access.return_value = True
+
+        result = platform.get_default_output_dir()
+        assert result == Path('/sdcard/Download/Youtube')
+
+    @patch('ytrd.platform.detect_platform')
+    @patch('os.access')
+    @patch('os.path.exists')
     def test_get_default_output_dir_termux_sdcard(self, mock_exists, mock_access, mock_detect):
         mock_detect.return_value = platform.Platform.ANDROID_TERMUX
-        # Мокаем os.path.exists чтобы возвращал True только для /sdcard/Download
-        mock_exists.side_effect = lambda p: p == '/sdcard/Download'
+        # Мокаем os.path.exists так, чтобы Youtube не существовал, а Download существовал
+        def exists_side_effect(p):
+            if p == '/sdcard/Download/Youtube': return False
+            if p == '/sdcard/Download': return True
+            return False
+            
+        mock_exists.side_effect = exists_side_effect
         mock_access.return_value = True
 
         result = platform.get_default_output_dir()
@@ -76,8 +94,8 @@ class TestGetDefaultOutputDir:
         mock_access.return_value = True
 
         result = platform.get_default_output_dir()
-        # Должен создать fallback директорию
-        mock_makedirs.assert_called_once()
+        # Должен попробовать создать Youtube папку и затем fallback
+        assert mock_makedirs.call_count >= 2
         assert result == Path.home() / 'downloads'
 
     @patch('ytrd.platform.detect_platform')
@@ -193,15 +211,18 @@ class TestEnsureWritePermission:
 class TestGlobalVariables:
     """Тесты глобальных переменных модуля."""
 
-    @patch('ytrd.platform.detect_platform')
-    def test_is_termux_global(self, mock_detect):
-        mock_detect.return_value = platform.Platform.ANDROID_TERMUX
-        # Нужно перезагрузить модуль для обновления глобальных переменных
+    def test_is_termux_global(self):
+        # Глобальные флаги вычисляются при импорте модуля, поэтому
+        # необходимо замокать условия, которые использует detect_platform().
         import importlib
-        importlib.reload(platform)
 
-        assert platform.IS_TERMUX is True
-        assert platform.CURRENT_PLATFORM == platform.Platform.ANDROID_TERMUX
+        with patch('sys.platform', 'linux'), patch('os.path.exists', return_value=True):
+            importlib.reload(platform)
+            assert platform.IS_TERMUX is True
+            assert platform.CURRENT_PLATFORM == platform.Platform.ANDROID_TERMUX
+
+        # Восстанавливаем глобальные значения для следующих тестов.
+        importlib.reload(platform)
 
     @patch('ytrd.platform.detect_platform')
     def test_termux_constants(self, mock_detect):

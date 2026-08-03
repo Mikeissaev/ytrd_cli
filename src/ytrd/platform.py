@@ -43,13 +43,21 @@ def get_default_output_dir() -> Path:
     if platform_type == Platform.ANDROID_TERMUX:
         # Приоритет путей для Termux
         candidates = [
+            '/sdcard/Download/Youtube',
             '/sdcard/Download',
             '/storage/emulated/0/Download',
             '/data/data/com.termux/files/home/downloads',
         ]
         for path_str in candidates:
-            if os.path.exists(path_str) and os.access(path_str, os.W_OK):
-                return Path(path_str)
+            try:
+                # Пытаемся создать папку, если это Youtube подпапка
+                if 'Youtube' in path_str and not os.path.exists(path_str):
+                    os.makedirs(path_str, exist_ok=True)
+                
+                if os.path.exists(path_str) and os.access(path_str, os.W_OK):
+                    return Path(path_str)
+            except OSError:
+                continue
         # Fallback - создать домашнюю директорию
         fallback = Path.home() / 'downloads'
         os.makedirs(fallback, exist_ok=True)
