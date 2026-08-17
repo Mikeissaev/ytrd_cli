@@ -34,6 +34,9 @@ _VOT_HMAC_KEY = os.getenv('VOT_HMAC_KEY', _DEFAULT_HMAC_KEY)
 VOT_HMAC_KEY = _VOT_HMAC_KEY.encode() if isinstance(_VOT_HMAC_KEY, str) else _VOT_HMAC_KEY
 HTTP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 
+# Языки, поддерживаемые Yandex VOT API в качестве исходных (целевой — всегда 'ru')
+VOT_SUPPORTED_LANGS = ('en', 'zh', 'ko', 'ar', 'fr', 'it', 'es', 'de', 'ja')
+
 # --- Retry Parameters ---
 RETRY_ATTEMPTS = 15
 RETRY_FRAGMENTS = 15

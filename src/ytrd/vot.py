@@ -16,14 +16,15 @@ log = logger.get_logger(__name__)
 def get_translation_audio(
     url: str,
     duration: float,
-    use_live_voice: bool = False
+    use_live_voice: bool = False,
+    source_lang: str = "en"
 ) -> Tuple[bool, Optional[str]]:
-    log.info(f"Starting translation polling: url={url}, duration={duration}, live_voice={use_live_voice}")
+    log.info(f"Starting translation polling: url={url}, duration={duration}, live_voice={use_live_voice}, source_lang={source_lang}")
     print(f"\n{config.COLOR_YELLOW}[1/3] Запрос перевода{' (Живой голос)' if use_live_voice else ''}...{config.COLOR_RESET}")
 
     max_attempts = config.RETRY_ATTEMPTS
     for attempt in range(max_attempts):
-        result = translate_video(url, duration, use_live_voice)
+        result = translate_video(url, duration, use_live_voice, source_lang=source_lang)
 
         if not result.get("success"):
             error_type = result.get("error_type")
@@ -53,6 +54,23 @@ def get_translation_audio(
 
     log.error("Translation polling timeout")
     return False, None
+
+
+def check_translation_availability(url: str, duration: float, source_lang: str = "en") -> dict:
+    """Checks translation availability for both voice types without downloading.
+
+    Performs a single API request per mode (standard and live voice).
+
+    Returns:
+        dict: {'standard': result, 'live': result} — результат translate_video()
+              для каждого режима.
+    """
+    log.info(f"Checking translation availability: url={url}, duration={duration}, source_lang={source_lang}")
+    results = {}
+    for mode, use_live in (('standard', False), ('live', True)):
+        results[mode] = translate_video(url, duration, use_live, source_lang=source_lang)
+        log.debug(f"Check result ({mode}): {results[mode]}")
+    return results
 
 
 def encode_varint(value: int) -> bytes:
@@ -172,7 +190,7 @@ def get_signature(body: bytes) -> str:
     return hmac.new(config.VOT_HMAC_KEY, body, hashlib.sha256).hexdigest()
 
 
-def translate_video(url: str, duration: float = 341.0, use_live_voice: bool = False) -> dict:
+def translate_video(url: str, duration: float = 341.0, use_live_voice: bool = False, source_lang: str = "en") -> dict:
     video_id = utils.extract_video_id(url)
     if not video_id:
         log.warning(f"Invalid YouTube URL: {url}")
@@ -183,7 +201,7 @@ def translate_video(url: str, duration: float = 341.0, use_live_voice: bool = Fa
     body += encode_bool(5, True)
     body += encode_double(6, float(duration))
     body += encode_int32(7, 1)
-    body += encode_string(8, "en")
+    body += encode_string(8, source_lang)
     body += encode_int32(9, 0)
     body += encode_int32(10, 0)
     body += encode_string(14, "ru")

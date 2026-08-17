@@ -238,3 +238,28 @@ class TestValidateUrl:
         # Теперь выбрасывается YtrdValidationError
         with pytest.raises(errors.YtrdValidationError):
             utils.validate_url("https://vimeo.com/123456")
+
+
+class TestNormalizeLanguageCode:
+    """Test suite for language code normalization."""
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("en", "en"),
+        ("en-US", "en"),
+        ("en_US", "en"),
+        ("EN", "en"),
+        ("Russian", "ru"),
+        ("russian", "ru"),
+        ("English", "en"),
+        ("de", "de"),
+        ("pt-BR", "pt"),
+        ("  fr  ", "fr"),
+    ])
+    def test_normalization(self, raw, expected):
+        from ytrd import utils
+        assert utils.normalize_language_code(raw) == expected
+
+    @pytest.mark.parametrize("raw", [None, "", "   "])
+    def test_empty_values(self, raw):
+        from ytrd import utils
+        assert utils.normalize_language_code(raw) is None

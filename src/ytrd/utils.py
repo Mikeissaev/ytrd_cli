@@ -99,6 +99,21 @@ def check_internet():
     socket.create_connection(('8.8.8.8', 53), timeout=5)
 
 
+def normalize_language_code(language):
+    """Normalizes yt-dlp language value to ISO 639-1 code ('en-US' -> 'en', 'English' -> 'en')."""
+    if not language:
+        return None
+    lang = str(language).strip().lower().replace('_', '-').split('-')[0]
+    if not lang:
+        return None
+    full_names = {
+        'english': 'en', 'russian': 'ru', 'german': 'de', 'french': 'fr',
+        'spanish': 'es', 'italian': 'it', 'japanese': 'ja', 'korean': 'ko',
+        'chinese': 'zh', 'arabic': 'ar',
+    }
+    return full_names.get(lang, lang)
+
+
 def validate_url(url):
     if not re.search(r'(youtube\.com|youtu\.?be)', url):
         raise errors.YtrdValidationError('Ссылка не похожа на YouTube')

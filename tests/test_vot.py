@@ -256,3 +256,55 @@ class TestSignatureGeneration:
         sig2 = vot.get_signature(b"body2")
         
         assert sig1 != sig2
+
+
+class TestCheckTranslationAvailability:
+    """Test suite for translation availability check (no download)."""
+
+    def test_check_queries_both_voice_types(self, monkeypatch):
+        """Check performs one API request per mode (standard + live)."""
+        calls = []
+
+        def mock_translate(url, duration, use_live_voice=False, source_lang="en"):
+            calls.append({'live': use_live_voice, 'lang': source_lang})
+            return {"success": True, "status": "Ready", "url": "http://test.mp3"}
+
+        monkeypatch.setattr(vot, 'translate_video', mock_translate)
+
+        results = vot.check_translation_availability("url", 100.0)
+
+        assert calls == [
+            {'live': False, 'lang': 'en'},
+            {'live': True, 'lang': 'en'},
+        ]
+        assert results['standard']['status'] == 'Ready'
+        assert results['live']['status'] == 'Ready'
+
+    def test_check_passes_source_lang(self, monkeypatch):
+        """Detected source language is forwarded to both API requests."""
+        calls = []
+
+        def mock_translate(url, duration, use_live_voice=False, source_lang="en"):
+            calls.append(source_lang)
+            return {"success": True, "status": "Waiting"}
+
+        monkeypatch.setattr(vot, 'translate_video', mock_translate)
+
+        vot.check_translation_availability("url", 100.0, source_lang="de")
+
+        assert calls == ["de", "de"]
+
+    def test_check_returns_per_mode_results(self, monkeypatch):
+        """Each mode result is reported independently."""
+        def mock_translate(url, duration, use_live_voice=False, source_lang="en"):
+            if use_live_voice:
+                return {"success": False, "status": "Error", "message": "no live"}
+            return {"success": True, "status": "Ready", "url": "http://test.mp3"}
+
+        monkeypatch.setattr(vot, 'translate_video', mock_translate)
+
+        results = vot.check_translation_availability("url", 100.0)
+
+        assert results['standard']['success'] is True
+        assert results['live']['success'] is False
+        assert results['live']['message'] == "no live"

@@ -19,6 +19,7 @@ class TestRunPipeline:
         mock_args.audio = False
         mock_args.quality = 1080
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         
@@ -74,6 +75,7 @@ class TestRunPipeline:
         mock_args = MagicMock()
         mock_args.audio = False
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
@@ -121,6 +123,7 @@ class TestRunPipeline:
         mock_args = MagicMock()
         mock_args.audio = False
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
@@ -154,6 +157,7 @@ class TestRunPipeline:
         mock_args = MagicMock()
         mock_args.audio = False  # Will be set by get_user_input_and_info
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
@@ -196,6 +200,7 @@ class TestRunPipeline:
         mock_args = MagicMock()
         mock_args.audio = False
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
@@ -239,6 +244,7 @@ class TestRunPipeline:
         mock_args = MagicMock()
         mock_args.audio = False
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
@@ -281,6 +287,7 @@ class TestRunPipeline:
         mock_args.dual = dual
         mock_args.audio = False
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         monkeypatch.setattr(main.history, 'is_in_history', MagicMock(return_value=False))
@@ -341,6 +348,7 @@ class TestRunPipeline:
         """Test user cancelling download when URL is in history."""
         mock_args = MagicMock()
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
@@ -373,6 +381,7 @@ class TestRunPipeline:
         """Test user continuing download even if URL is in history."""
         mock_args = MagicMock()
         mock_args.clear_history = False
+        mock_args.check = False
         
         monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
         monkeypatch.setattr(main.utils, 'install_check', MagicMock())
@@ -411,6 +420,79 @@ class TestRunPipeline:
         mock_download_video.assert_called_once()
         # Should add to history again (refresh it)
         mock_add_history.assert_called_once_with("http://url")
+
+
+    def _setup_check_mocks(self, monkeypatch, language="en"):
+        """Common mocks for translation check tests. Returns (mock_args, mock_check)."""
+        mock_args = MagicMock()
+        mock_args.clear_history = False
+        mock_args.check = True
+        mock_args.url = "http://url"
+
+        monkeypatch.setattr(main.cli, 'parse_arguments', lambda: mock_args)
+        monkeypatch.setattr(main.utils, 'validate_url', MagicMock())
+        monkeypatch.setattr(main.utils, 'check_internet', MagicMock())
+        monkeypatch.setattr(main.cli, 'print_translation_check_results', MagicMock())
+        monkeypatch.setattr(
+            main.downloader, 'get_available_qualities',
+            lambda url: ([1080], "Title", "Up", 100.0, language)
+        )
+        mock_check = MagicMock(return_value={
+            'standard': {'success': True, 'status': 'Ready', 'url': 'http://a.mp3'},
+            'live': {'success': True, 'status': 'Ready', 'url': 'http://b.mp3'},
+        })
+        monkeypatch.setattr(main.vot, 'check_translation_availability', mock_check)
+        return mock_args, mock_check
+
+    def test_run_pipeline_check_translation_available(self, monkeypatch):
+        """Check mode: translation available for both voice types."""
+        _, mock_check = self._setup_check_mocks(monkeypatch)
+
+        main.run_pipeline()
+
+        mock_check.assert_called_once_with("http://url", 100.0, source_lang='en')
+
+    def test_run_pipeline_check_translation_unavailable(self, monkeypatch):
+        """Check mode: raises YtrdTranslationUnavailable when no mode is ready."""
+        _, mock_check = self._setup_check_mocks(monkeypatch)
+        mock_check.return_value = {
+            'standard': {'success': True, 'status': 'Waiting'},
+            'live': {'success': False, 'status': 'Error', 'message': 'nope'},
+        }
+
+        with pytest.raises(main.errors.YtrdTranslationUnavailable):
+            main.run_pipeline()
+
+    def test_run_pipeline_check_russian_video_not_needed(self, monkeypatch):
+        """Check mode: Russian video needs no translation, API is not called."""
+        _, mock_check = self._setup_check_mocks(monkeypatch, language="Russian")
+
+        main.run_pipeline()
+
+        mock_check.assert_not_called()
+        printed = main.cli.print_translation_check_results.call_args[0][4]
+        assert printed['standard']['status'] == 'NotNeeded'
+        assert printed['live']['status'] == 'NotNeeded'
+
+    def test_run_pipeline_check_unsupported_language(self, monkeypatch):
+        """Check mode: unsupported language makes translation impossible, API not called."""
+        _, mock_check = self._setup_check_mocks(monkeypatch, language="pt-BR")
+
+        with pytest.raises(main.errors.YtrdTranslationUnavailable):
+            main.run_pipeline()
+
+        mock_check.assert_not_called()
+        printed = main.cli.print_translation_check_results.call_args[0][4]
+        assert printed['standard']['status'] == 'UnsupportedLang'
+        assert 'pt' in printed['standard']['message']
+
+    def test_run_pipeline_check_passes_detected_source_lang(self, monkeypatch):
+        """Check mode: detected video language is passed to the VOT request."""
+        _, mock_check = self._setup_check_mocks(monkeypatch, language="de")
+
+        main.run_pipeline()
+
+        mock_check.assert_called_once_with("http://url", 100.0, source_lang='de')
 
 
 class TestEntryPoint:

@@ -19,12 +19,60 @@ def _set_runtime_paths(ctx):
     config.TEMP_AUDIO_FILENAME = ctx.temp_audio_path
 
 
+def run_translation_check(args):
+    """Checks translation availability for both voice types without downloading."""
+    url = args.url
+    if not url:
+        try:
+            url = input(f"{config.COLOR_CYAN}🔗 Вставьте ссылку: {config.COLOR_RESET}").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+    if not url:
+        raise errors.YtrdValidationError('Ссылка не может быть пустой.')
+
+    utils.validate_url(url)
+    try:
+        utils.check_internet()
+    except Exception as e:
+        raise errors.YtrdNetworkError(f'Ошибка подключения: {e}')
+
+    _, title, uploader, duration, language = downloader.get_available_qualities(url)
+    if not duration:
+        duration = config.DEFAULT_VIDEO_DURATION
+
+    lang_code = utils.normalize_language_code(language)
+
+    # Видео уже на русском — перевод не требуется (API не вызываем)
+    if lang_code == 'ru':
+        results = {mode: {'success': True, 'status': 'NotNeeded'} for mode in ('standard', 'live')}
+        cli.print_translation_check_results(title, uploader, duration, language, results)
+        return
+
+    # Язык не поддерживается VOT API — перевод невозможен (API не вызываем)
+    if lang_code and lang_code not in config.VOT_SUPPORTED_LANGS:
+        message = f'язык «{lang_code}» не поддерживается (поддерживаются: {", ".join(config.VOT_SUPPORTED_LANGS)})'
+        results = {mode: {'success': False, 'status': 'UnsupportedLang', 'message': message}
+                   for mode in ('standard', 'live')}
+        cli.print_translation_check_results(title, uploader, duration, language, results)
+        raise errors.YtrdTranslationUnavailable(f'Перевод невозможен: {message}')
+
+    results = vot.check_translation_availability(url, duration, source_lang=lang_code or 'en')
+    cli.print_translation_check_results(title, uploader, duration, language, results)
+
+    if not any(r.get('success') and r.get('status') == 'Ready' for r in results.values()):
+        raise errors.YtrdTranslationUnavailable('Перевод сейчас недоступен')
+
+
 def run_pipeline():
     """Main execution pipeline (Conductor)."""
     args = cli.parse_arguments()
 
     if args.clear_history:
         history.clear_history()
+        return
+
+    if args.check:
+        run_translation_check(args)
         return
 
     ctx = runtime.create_runtime_context()
@@ -65,8 +113,9 @@ def run_pipeline():
 
         if not skip_translation:
             try:
+                source_lang = utils.normalize_language_code(language) or 'en'
                 translation_success, audio_url = vot.get_translation_audio(
-                    url, duration, use_live_voice=use_live_voice
+                    url, duration, use_live_voice=use_live_voice, source_lang=source_lang
                 )
             except errors.YtrdTranslationUnavailable:
                 translation_success, audio_url = False, None

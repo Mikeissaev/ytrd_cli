@@ -234,6 +234,7 @@ def parse_arguments():
   ytrd https://youtu.be/VIDEO_ID -d       # Режим двух дорожек (Dual)
   ytrd https://youtu.be/VIDEO_ID -q 1080  # Скачать 1080p
   ytrd https://youtu.be/VIDEO_ID -s       # Скачать с субтитрами
+  ytrd https://youtu.be/VIDEO_ID --check  # Проверить доступность перевода без скачивания
   ytrd --clear-history                    # Очистить историю скачиваний
     """
 
@@ -260,11 +261,37 @@ def parse_arguments():
     parser.add_argument("-a", "--audio", action="store_true", help="Режим 'Только аудио'.\nСкачивает только переведенную аудиодорожку (mp3).")
     parser.add_argument("-s", "--subtitles", action="store_true", help="Скачать и вшить русские субтитры (если доступны).")
     parser.add_argument("-l", "--live", action="store_true", help="Использовать 'Живой голос'.\nБолее качественная и естественная озвучка.")
+    parser.add_argument("--check", action="store_true", help="Проверить доступность перевода (обычный и живой голос)\nбез скачивания и выйти.")
     parser.add_argument("--clear-history", action="store_true", help="Очистить файл истории скачиваний и выйти.")
 
     args = parser.parse_args()
     log.debug(f"Arguments parsed: url={args.url}, output={args.output}, mix={args.mix}, dual={args.dual}, quality={args.quality}, audio={args.audio}, subtitles={args.subtitles}, live={args.live}")
     return validate_args_compatibility(args)
+
+def print_translation_check_results(title, uploader, duration, language, results):
+    """Prints formatted translation availability results for both voice types."""
+    def format_status(result):
+        status = result.get('status')
+        if result.get('success') and status == 'Ready':
+            return f"{config.COLOR_GREEN}✅ доступен{config.COLOR_RESET}"
+        if result.get('success') and status == 'Waiting':
+            return f"{config.COLOR_YELLOW}⏳ готовится (попробуйте позже){config.COLOR_RESET}"
+        if status == 'NotNeeded':
+            return f"{config.COLOR_CYAN}ℹ️  не требуется (видео уже на русском){config.COLOR_RESET}"
+        if status == 'UnsupportedLang':
+            message = result.get('message') or 'язык не поддерживается'
+            return f"{config.COLOR_RED}🚫 невозможен ({message}){config.COLOR_RESET}"
+        message = result.get('message') or 'неизвестная ошибка'
+        return f"{config.COLOR_RED}❌ недоступен ({message}){config.COLOR_RESET}"
+
+    minutes = int(duration // 60)
+    seconds = int(duration % 60)
+    print(f"\n🎥 {title}")
+    print(f"👤 {uploader} | ⏱  {minutes}:{seconds:02d} | 🌐 {language or 'unknown'}")
+    print(f"\n{config.COLOR_CYAN}🔍 Доступность перевода:{config.COLOR_RESET}")
+    print(f"  Стандартный голос: {format_status(results.get('standard', {}))}")
+    print(f"  Живой голос:       {format_status(results.get('live', {}))}")
+
 
 def ask_voice_type():
     """Asks user about voice type (Standard or Live)."""
