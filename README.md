@@ -60,7 +60,7 @@ sudo apt install -y python3 python3-pip ffmpeg git
 Скачайте проект:
 
 ```bash
-git clone https://github.com/Mikeissaev/ytrd.git
+git clone https://github.com/id-ex/ytrd.git
 cd ytrd
 ```
 
@@ -88,7 +88,7 @@ winget install Gyan.FFmpeg
 Скачайте и установите проект:
 
 ```powershell
-git clone https://github.com/Mikeissaev/ytrd.git
+git clone https://github.com/id-ex/ytrd.git
 cd ytrd
 py -m pip install .
 ```
@@ -117,7 +117,7 @@ termux-setup-storage
 Скачайте и установите проект:
 
 ```bash
-git clone https://github.com/Mikeissaev/ytrd.git
+git clone https://github.com/id-ex/ytrd.git
 cd ytrd
 python -m pip install .
 ```

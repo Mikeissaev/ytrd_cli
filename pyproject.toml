@@ -9,7 +9,7 @@ description = "Утилита командной строки для скачи�
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
-  {name = "mikeissaev", email = "scr89shadow@gmail.com"},
+  {name = "id-ex", email = "scr89shadow@gmail.com"},
 ]
 dependencies = [
   "requests",
