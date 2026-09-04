@@ -1,5 +1,7 @@
 # ytrd
 
+[![CI](https://github.com/id-ex/ytrd/actions/workflows/ci.yml/badge.svg)](https://github.com/id-ex/ytrd/actions/workflows/ci.yml)
+
 [English](#english) · [Русский](#русский)
 
 <a id="english"></a>
