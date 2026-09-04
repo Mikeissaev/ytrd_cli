@@ -1,5 +1,76 @@
 # ytrd
 
+[English](#english) · [Русский](#русский)
+
+<a id="english"></a>
+
+## English
+
+**ytrd** is a cross-platform command-line tool that downloads YouTube videos and adds a Russian voice-over track provided by the Yandex Voice-Over Translation service.
+
+It supports Linux, Windows, macOS, and Android through Termux.
+
+### Features
+
+- automated `yt-dlp` → voice-over → FFmpeg processing pipeline;
+- standard voice-over and Yandex Live Voice modes;
+- **Mix** mode with the original and translated audio combined;
+- **Dual** mode with separate selectable audio tracks;
+- translated audio-only MP3 downloads;
+- selectable video quality with H.264 compatibility preference;
+- embedded subtitles with Russian-to-English fallback;
+- cookies support for restricted YouTube content;
+- network retries, download history, file logging, and isolated temporary workspaces;
+- translation availability check without downloading the video.
+
+### Requirements
+
+- Python 3.8 or newer;
+- FFmpeg available in `PATH`;
+- an internet connection.
+
+### Installation
+
+```bash
+git clone https://github.com/id-ex/ytrd.git
+cd ytrd
+python -m pip install .
+```
+
+### Quick start
+
+Run the interactive downloader:
+
+```bash
+ytrd "https://youtu.be/VIDEO_ID"
+```
+
+Choose a mode directly:
+
+```bash
+ytrd "https://youtu.be/VIDEO_ID" --mix
+ytrd "https://youtu.be/VIDEO_ID" --dual --quality 1080
+ytrd "https://youtu.be/VIDEO_ID" --audio
+ytrd "https://youtu.be/VIDEO_ID" --subtitles
+```
+
+Check whether standard and Live Voice translations are available without downloading:
+
+```bash
+ytrd "https://youtu.be/VIDEO_ID" --check
+```
+
+For the complete installation, configuration, cookies, and CLI reference, see the [Russian documentation](#русский) below.
+
+> [!NOTE]
+> This project uses an unofficial Yandex Voice-Over Translation interface and is not affiliated with or endorsed by Yandex or YouTube. Availability may change without notice. Users are responsible for complying with the applicable platform terms and copyright laws.
+
+---
+
+<a id="русский"></a>
+
+## Русский
+
 CLI-утилита для скачивания видео с YouTube с автоматическим добавлением русской закадровой озвучки через Yandex Voice-Over Translation API.
 
 Поддерживаются Linux, Windows, macOS и Android Termux.
